@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Données brutes (re-téléchargées par model/train.py)
+model/data/
+
+# Secrets locaux : ne JAMAIS commiter (−2 points)
+local.settings.json
+.env
+*.publishsettings
