@@ -9,7 +9,7 @@
 # =============================================================================
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
-[[ "$EQ" == "<equipe>" || "$LOC" == "<region>" ]] && { echo "Renseigner EQ et LOC dans infra/pipeline/env.sh"; exit 1; }
+echo "Groupe $RG, région $LOC, stockage $ST, Function App $FUNC, Cosmos DB $COSMOS"
 
 echo "== 0. Groupe de ressources (étiquettes FinOps)"
 az group create -n "$RG" -l "$LOC" --tags projet=dscc equipe="$EQ" -o none

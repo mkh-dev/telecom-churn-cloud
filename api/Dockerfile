@@ -18,16 +18,13 @@ FROM python:3.12-slim
 
 # Modèle chargé au démarrage ; une autre révision (A/B) peut surcharger MODEL_PATH / MODEL_VERSION
 ARG MODEL_FILE=model-1.0.0.joblib
-# Commit du code, renvoyé par GET /version (fourni par la CI : --build-arg GIT_SHA=${{ github.sha }})
-ARG GIT_SHA=unknown
+# Commit de l'image, renvoyé par GET /version (passé par la CI : --build-arg GIT_SHA=<sha court>)
+ARG GIT_SHA=dev
 
-ENV PATH="/opt/venv/bin:$PATH" \
+ENV PATH="/opt/venv/bin:$PATH"     GIT_SHA=${GIT_SHA} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    MODEL_PATH=/app/models/${MODEL_FILE} \
-    GIT_SHA=${GIT_SHA}
-
-LABEL org.opencontainers.image.revision=${GIT_SHA}
+    MODEL_PATH=/app/models/${MODEL_FILE}
 
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin api
 

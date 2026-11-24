@@ -206,69 +206,129 @@ python -m http.server 8080
 # http://localhost:8080/?api=https://<function-app>.azurewebsites.net   vraies données
 ```
 
-En production, `deploy.yml` réécrit `web/config.js` avec la variable GitHub `API_BASE_URL`.
+En production, `deploy.yml` réécrit `web/config.js` avec l'adresse de la Function App. Avec la vraie réponse de
+`/api/recent`, le tableau des clients affiche les 5 clients les plus à risque du dernier fichier (`topRisk`).
 
 ## 6. Intégration et déploiement continus (membre 4)
 
-| Workflow | Déclencheur | Jobs |
+| Workflow | Déclencheur | Ce qu'il fait |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | push sur `main`, toute pull request | **model** : ruff + pytest ; **api** : ruff + pytest + image Docker (publiée sur GHCR seulement sur `main`) ; **functions** : ruff + pytest ; **web** : syntaxe JS, conformité de `demo/recent.json` au contrat, validation HTML |
-| [`deploy.yml`](.github/workflows/deploy.yml) | push sur `main` touchant `web/` ou `functions/`, ou manuel | **web** : envoi de `web/` dans `$web` ; **functions** : publication de la Function App |
+| [`ci.yml`](.github/workflows/ci.yml) | push sur `main`, toute pull request | **model**, **functions** : ruff + pytest ; **api** : ruff + pytest + image Docker, publiée sur GHCR (`<version>` et `sha-<commit>`) seulement sur `main` ; **web** : syntaxe JS, données de démo conformes au contrat, validation HTML |
+| [`deploy.yml`](.github/workflows/deploy.yml) | après chaque run **vert** de `CI` sur `main`, ou à la main | connexion **OIDC** ; **api** : nouvelle révision Container Apps avec l'image `sha-<commit>`, puis vérification que `GET /version` renvoie ce commit ; **functions** : déploiement Flex Consumption puis vérification de `/api/recent` ; **web** : `config.js` de production et envoi dans `$web` |
 
-Un job dont le dossier n'est pas encore fusionné (`api/`, `functions/`) est ignoré avec un message, au lieu d'échouer.
-À activer dans *Settings > Branches* : protéger `main` (pull request obligatoire, CI verte).
+**Aucun secret dans GitHub.** `deploy.yml` s'authentifie par **OIDC** (identité fédérée) : GitHub fournit un jeton
+signé à courte durée de vie ; Azure ne l'accepte que s'il vient de ce dépôt et de l'environnement `production`,
+et délivre en échange un jeton d'accès de quelques minutes pour l'**identité managée** `id-github-<equipe>`.
+Cette identité n'a que deux rôles, limités au projet : *Contributor* sur le groupe de ressources et
+*Storage Blob Data Contributor* sur le compte de stockage. Les Functions accèdent au stockage et à Cosmos DB avec
+leur propre identité managée (membre 3) : aucune chaîne de connexion nulle part.
 
-Configuration GitHub (*Settings > Secrets and variables > Actions*) :
+Variables du dépôt (*Settings > Secrets and variables > Actions > Variables*, ce ne sont pas des secrets),
+affichées par [`infra/github-oidc.sh`](infra/github-oidc.sh) :
 
-| Nom | Type | Valeur |
-|---|---|---|
-| `AZURE_STORAGE_CONNECTION_STRING` | secret | `az storage account show-connection-string -g <rg> -n <stockage> -o tsv` |
-| `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | secret | portail > Function App > *Télécharger le profil de publication* |
-| `API_BASE_URL` | variable | `https://<function-app>.azurewebsites.net` |
-| `FUNCTIONAPP_NAME` | variable | nom de la Function App |
+| Variable | Exemple |
+|---|---|
+| `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | identifiants publics de l'identité managée |
+| `AZURE_RG`, `API_APP`, `FUNC_APP`, `STORAGE_ACCOUNT` | `rg-projet-<equipe>`, `api-<equipe>`, `func-<equipe>`, `st<equipe>pipe` |
 
-Azure for Students ne permet généralement pas de créer un principal de service : les déploiements utilisent
-donc des secrets limités à une ressource (chaîne de connexion du stockage, profil de publication) plutôt qu'une
-connexion OIDC à toute la souscription.
+Si une variable manque, `deploy.yml` **échoue** avec un message explicite au lieu de « réussir » sans rien déployer.
+
+Preuve qu'un commit sur `main` met à jour l'API : la CI fige le SHA court dans l'image (`--build-arg GIT_SHA`),
+et le job **api** attend que `GET /version` le renvoie :
+
+```bash
+curl -s https://api-<equipe>.<region>.azurecontainerapps.io/version
+# {"api_version":"0.2.0","model_version":"1.0.0","commit":"3f9c2ab"}
+```
 
 ## 7. Supervision et alertes (membre 4)
 
-[`infra/monitoring.sh`](infra/monitoring.sh) crée, en `francecentral` :
-
-- un espace **Log Analytics** (rétention 30 jours, **plafond 0,1 Go/jour** pour protéger le budget) et
-  **Application Insights** `appi-churn` basé sur cet espace ;
-- le branchement de la Function App (paramètre `APPLICATIONINSIGHTS_CONNECTION_STRING`) et de la Container App
-  (secret `appinsights-cs`, voir `api/deploy/containerapp.md`) ;
-- un groupe d'actions e-mail et 4 alertes :
+[`infra/monitoring.sh`](infra/monitoring.sh) crée Log Analytics (rétention 30 jours, **plafond 0,1 Go/jour** pour le
+budget) et Application Insights `appi-<equipe>`. Il les branche sur la Function App et la Container App, et crée
+un groupe d'actions e-mail et 5 alertes :
 
 | Alerte | Condition | Sévérité |
 |---|---|---|
-| `alert-requetes-en-echec` | plus de 5 requêtes en échec en 5 min | 2 |
+| `alert-fichier-rejete` | trace `DISPATCH_REJECTED` : un fichier déposé a été rejeté | 3 |
+| `alert-echec-worker` | trace `WORKER_FAILED` : le worker a échoué (nouvelle tentative ou poison) | 2 |
+| `alert-erreurs-5xx` | plus de 3 requêtes en échec en 5 min | 2 |
 | `alert-latence` | temps de réponse moyen > 2 000 ms sur 15 min (critère de succès < 2 s) | 3 |
-| `alert-exceptions-pipeline` | au moins une exception dans les Functions sur 10 min | 2 |
-| `alert-file-en-attente` | plus de 20 messages en attente dans la file sur 1 h | 3 |
+| `alert-file-en-attente` | plus de 20 messages en attente dans les files | 3 |
 
-- le site web statique du tableau de bord et le **CORS** de la Function App pour son origine.
+**Métriques personnalisées** (OpenTelemetry, table `customMetrics`) : `pipeline.inferences` (nombre
+d'inférences) et `pipeline.model_latency_ms` (latence du modèle) envoyées par le worker, ainsi que
+`churn_customers_scored` et `churn_model_latency_ms` envoyées par l'API.
 
-```bash
-RG=<rg> STORAGE=<stockage> FUNC_APP=<function-app> CONTAINER_APP=<container-app> \
-ALERT_EMAIL=<adresse> bash infra/monitoring.sh
-```
+**Alerte déclenchée volontairement** : [`infra/declencher-alerte.sh`](infra/declencher-alerte.sh) dépose un CSV
+sans les colonnes obligatoires. Le dispatcher le rejette, puis `alert-fichier-rejete` se déclenche en 5 à 10 min
+et envoie l'e-mail. Le script attend l'alerte dans Azure Monitor et affiche son état. Capture :
+`docs/captures/10-alertes.png`.
 
 ### Requêtes KQL
 
 Dans [`docs/kql/requetes.kql`](docs/kql/requetes.kql) (portail > Application Insights > *Journaux*) :
 
-1. **Temps de réponse de `/predict`** : p50, p95 et échecs par tranche de 15 min, comparés à l'objectif de 2 s.
-2. **A/B des modèles** : clients scorés et latence moyenne du modèle par `model_version` (métriques
-   OpenTelemetry `churn_customers_scored` et `churn_model_latency_ms` de l'API).
-3. **Santé du pipeline** : exécutions, échecs et exceptions par composant (dispatcher, worker, recent, API).
+1. **Nombre d'inférences par heure** : `customMetrics` `pipeline.inferences` (fichiers) et
+   `pipeline.customers_scored` (clients), regroupés par heure.
+2. **Les 5 fichiers les plus lents** : traces `INFERENCE_DONE` du worker, triées par `durationMs`, avec la
+   latence de l'API et du modèle, et le nombre de clients.
+3. **Répartition des codes HTTP et des erreurs** : `requests` par composant et `resultCode`, plus les erreurs
+   du pipeline par type (`reasonCode` des rejets, `errorType` des échecs du worker).
 
-Deux requêtes bonus : dernières exceptions, et trajet de bout en bout d'un fichier à partir de son nom.
-Captures : [`docs/captures/`](docs/captures/).
+Bonus : latence du modèle par version (A/B 1.0.0 / 2.0.0). Captures : [`docs/captures/`](docs/captures/).
+
+## 8. Déploiement pas à pas
+
+Toutes les commandes sont lancées depuis la racine du dépôt, dans Bash (Cloud Shell, WSL ou Git Bash), après
+`az login`, par le propriétaire de l'abonnement d'intégration. Les noms communs sont dans
+`infra/pipeline/env.sh` (renseigner `EQ` et `LOC`).
+
+```bash
+source infra/pipeline/env.sh
+
+# 1. Supervision d'abord : la Function App sera créée avec Application Insights (membre 4)
+ALERT_EMAIL=<adresse> bash infra/monitoring.sh
+
+# 2. Socle du pipeline : Cosmos DB, stockage (+ $web), file, Function App, identité, CORS (membre 3)
+bash infra/pipeline/01_pipeline.sh
+
+# 3. API sur Container Apps (membre 2) : voir api/deploy/containerapp.md
+#    (image ghcr.io/mkh-dev/telecom-churn-cloud/api, 0,25 vCPU, 0 à 2 réplicas, port 8000)
+
+# 4. Identité managée + OIDC pour GitHub Actions (membre 4), puis créer les variables affichées
+bash infra/github-oidc.sh
+
+# 5. Premier déploiement : GitHub > Actions > Deploy > Run workflow (API + Functions + tableau de bord)
+
+# 6. Relancer 01 (API_URL pointe alors vers l'API) et 02 (abonnement Event Grid après le code)
+bash infra/pipeline/01_pipeline.sh && bash infra/pipeline/02_eventgrid.sh
+
+# 7. Relancer la supervision pour brancher la Container App et créer les alertes sur le stockage
+ALERT_EMAIL=<adresse> bash infra/monitoring.sh
+
+# 8. Démonstration et preuves
+bash infra/pipeline/03_demo.sh valide
+bash infra/declencher-alerte.sh
+```
+
+Ensuite, chaque fusion sur `main` lance `CI` puis `Deploy` automatiquement.
+Après la soutenance : `az group delete -n "$RG" --yes` (budget).
+
+## 9. Restrictions Azure for Students rencontrées et solutions
+
+| Restriction | Conséquence | Solution appliquée |
+|---|---|---|
+| Stratégie « Allowed resource deployment regions » : 5 régions seulement | `denmarkeast` n'a pas Container Apps | Une seule région pour tout le projet (section 2) |
+| Création d'une application Entra ID / principal de service souvent refusée aux comptes étudiants (`az ad sp create-for-rbac` : privilèges insuffisants) | Impossible d'utiliser un principal de service pour OIDC | **Identité managée attribuée par l'utilisateur** avec identifiants fédérés GitHub (`infra/github-oidc.sh`) : OIDC sans application Entra ID et sans secret |
+| Cosmos DB : le portail ne propose que des régions EUAP | – | Création en CLI (`01_pipeline.sh`, étape 1) |
+| Création de la Function App limitée (`429 throttled`) | Échec ponctuel | Attendre, puis relancer le script (ré-exécutable) |
+| Le propriétaire n'a pas de rôle de données sur le stockage (`AuthorizationPermissionMismatch`) | `az storage … --auth-mode login` refusé | Rôles de données attribués aux identités (Function App, GitHub) ; clé lue par ARM seulement dans le script d'installation |
+| Budget limité (crédit étudiant, 25 $ visés) | Coûts de télémétrie possibles | Plafond Log Analytics 0,1 Go/jour, rétention 30 jours, Container Apps à 0 réplica au repos, Cosmos DB Free Tier, GHCR au lieu d'ACR |
+
+Les restrictions découvertes pendant le déploiement sont ajoutées ici et dans `docs/pipeline.md` §9.
 
 ## Sections à compléter
 
-- Déploiement pas à pas (membres 2 et 4)
-- Captures du tableau de bord et des requêtes KQL sur les vraies données (membre 4, après déploiement)
-- Restrictions Azure for Students rencontrées et solutions (tous)
+- Captures sur les vraies données : tableau de bord, 3 requêtes KQL, alerte déclenchée, runs GitHub Actions (membre 4, après déploiement, liste dans `docs/captures/README.md`)
+- Vidéo de démonstration (membre 4, script dans `docs/video-demo.md`)
+- Rapport de coûts (membre 2)

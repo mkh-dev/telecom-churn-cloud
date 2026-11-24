@@ -1,63 +1,76 @@
-// Requêtes KQL pour Application Insights (membre 4).
-// Portail Azure > appi-churn > Journaux. Coller UNE requête à la fois. Captures dans docs/captures/.
+// Requêtes KQL exigées par le sujet (membre 4) — Application Insights > Journaux.
+// Coller UNE requête à la fois, choisir la période (ex. 24 heures), puis capture dans docs/captures/.
+//
+// Sources de télémétrie utilisées :
+//   - customMetrics « pipeline.inferences » et « pipeline.model_latency_ms » : métriques OpenTelemetry
+//     personnalisées du worker (functions/function_app.py, classe _Metrics) ;
+//   - traces « INFERENCE_DONE {json} » : une ligne par fichier traité (nom, durée, nombre de clients) ;
+//   - requests : requêtes HTTP de l'API (Container Apps) et des Functions, avec leur code de retour.
 
-// ---------------------------------------------------------------------------------------------
-// 1. Temps de réponse de l'API /predict (p50, p95) et objectif de 2 s, par tranche de 15 min
-// ---------------------------------------------------------------------------------------------
+// =============================================================================================
+// 1. Nombre d'inférences par heure
+//    pipeline.inferences = 1 par fichier traité ; pipeline.customers_scored = clients évalués
+// =============================================================================================
+customMetrics
+| where timestamp > ago(24h)
+| where name in ("pipeline.inferences", "pipeline.customers_scored")
+| summarize fichiers_traites = sumif(valueSum, name == "pipeline.inferences"),
+            clients_scores = sumif(valueSum, name == "pipeline.customers_scored")
+    by heure = bin(timestamp, 1h)
+| order by heure asc
+| render columnchart with (title = "Inférences par heure")
+
+// =============================================================================================
+// 2. Les 5 fichiers les plus lents
+//    durationMs = traitement complet par le worker (lecture du CSV, appel API, écriture output/ + Cosmos)
+// =============================================================================================
+traces
+| where timestamp > ago(7d)
+| where message startswith "INFERENCE_DONE "
+| extend d = parse_json(substring(message, strlen("INFERENCE_DONE ")))
+| project timestamp,
+          fichier = tostring(d.fileName),
+          duree_totale_ms = todouble(d.durationMs),
+          latence_api_ms = todouble(d.apiLatencyMs),
+          latence_modele_ms = todouble(d.modelLatencyMs),
+          clients = toint(d.nCustomers),
+          modele = tostring(d.modelVersion),
+          tentative = toint(d.attempt)
+| top 5 by duree_totale_ms desc
+
+// =============================================================================================
+// 3. Répartition des codes HTTP et des erreurs
+//    3a. Codes HTTP par composant (API FastAPI, fonction recent…)
+// =============================================================================================
 requests
 | where timestamp > ago(24h)
-| where name has "/predict"
-| summarize appels = count(),
-            p50_ms = percentile(duration, 50),
-            p95_ms = percentile(duration, 95),
-            echecs = countif(success == false)
-    by bin(timestamp, 15m)
-| extend objectif_ms = 2000
-| order by timestamp asc
-| render timechart
+| extend composant = iff(cloud_RoleName == "", "inconnu", cloud_RoleName),
+         famille = strcat(substring(resultCode, 0, 1), "xx")
+| summarize requetes = count() by composant, resultCode, famille
+| extend part = round(100.0 * requetes / toscalar(requests | where timestamp > ago(24h) | count), 1)
+| order by requetes desc
 
-// ---------------------------------------------------------------------------------------------
-// 2. Clients scorés et latence du modèle par version (A/B 1.0.0 vs 2.0.0)
-//    Métriques OpenTelemetry de l'API : churn_customers_scored, churn_model_latency_ms
-// ---------------------------------------------------------------------------------------------
+// Variante graphique pour la capture :
+// requests | where timestamp > ago(24h) | summarize count() by resultCode | render piechart
+
+// =============================================================================================
+// 3b. (complément) Répartition des erreurs du pipeline par type
+//     Rejets du dispatcher (reasonCode) et échecs du worker (errorType)
+// =============================================================================================
+traces
+| where timestamp > ago(7d)
+| where message startswith "DISPATCH_REJECTED " or message startswith "WORKER_FAILED "
+| extend etape = iff(message startswith "DISPATCH_REJECTED", "dispatcher : fichier rejeté", "worker : échec")
+| extend d = parse_json(substring(message, indexof(message, " ") + 1))
+| extend type_erreur = coalesce(tostring(d.reasonCode), tostring(d.errorType))
+| summarize occurrences = count(), dernier = max(timestamp) by etape, type_erreur
+| order by occurrences desc
+
+// =============================================================================================
+// Bonus — latence du modèle par version (A/B 1.0.0 / 2.0.0), métrique pipeline.model_latency_ms
+// =============================================================================================
 customMetrics
 | where timestamp > ago(7d)
-| where name in ("churn_customers_scored", "churn_model_latency_ms")
-| extend model_version = tostring(customDimensions.model_version)
-| summarize total = sum(valueSum), n = sum(valueCount) by name, model_version
-| extend valeur = iff(name == "churn_model_latency_ms", round(total / n, 2), total)
-| project indicateur = iff(name == "churn_model_latency_ms", "latence moyenne du modèle (ms)", "clients scorés"),
-          model_version, valeur
-| order by indicateur, model_version
-
-// ---------------------------------------------------------------------------------------------
-// 3. Santé du pipeline : exécutions et échecs par composant (dispatcher, worker, recent, API)
-// ---------------------------------------------------------------------------------------------
-union requests, exceptions
-| where timestamp > ago(24h)
-| extend composant = strcat(cloud_RoleName, " : ", operation_Name)
-| summarize executions = countif(itemType == "request"),
-            echecs = countif(itemType == "request" and success == false),
-            exceptions = countif(itemType == "exception")
-    by composant
-| extend taux_echec = round(100.0 * echecs / iff(executions == 0, 1, executions), 1)
-| order by echecs desc, executions desc
-
-// ---------------------------------------------------------------------------------------------
-// 4. (bonus) Dernières exceptions avec leur message, pour le diagnostic
-// ---------------------------------------------------------------------------------------------
-exceptions
-| where timestamp > ago(24h)
-| project timestamp, cloud_RoleName, operation_Name, type, message = coalesce(outerMessage, innermostMessage)
-| order by timestamp desc
-| take 20
-
-// ---------------------------------------------------------------------------------------------
-// 5. (bonus) Trajet de bout en bout d'un fichier : toutes les traces qui citent son nom
-// ---------------------------------------------------------------------------------------------
-let fichier = "clients-2026-11-25.csv";
-union traces, requests, exceptions, dependencies
-| where timestamp > ago(2d)
-| where * has fichier
-| project timestamp, itemType, cloud_RoleName, operation_Name, name, message, duration, success
-| order by timestamp asc
+| where name == "pipeline.model_latency_ms"
+| extend version = tostring(customDimensions.model_version)
+| summarize latence_moyenne_ms = round(sum(valueSum) / sum(valueCount), 1), appels = sum(valueCount) by version

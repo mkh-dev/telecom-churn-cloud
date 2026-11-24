@@ -1,12 +1,13 @@
 # Variables communes — à sourcer :  source infra/pipeline/env.sh
-# Remplacer <equipe> et <region> (région validée avec : az functionapp list-flexconsumption-locations)
-export EQ="${EQ:-<equipe>}"            # minuscules, sans tiret (ex. dscc7)
-export LOC="${LOC:-<region>}"          # ex. francecentral, swedencentral
-export RG="rg-projet-$EQ"
-export ST="st${EQ}pipe"                # compte de stockage (unique au monde)
-export COSMOS="cosmos-$EQ"
-export FUNC="func-$EQ"
-export AI="appi-$EQ"
-export LAW="log-$EQ"
-export API_APP="api-$EQ"               # Container App du membre 2
+# Noms alignés sur le reste de l'équipe (infra/monitoring.sh, README §2 : France Central).
+# Chaque valeur peut être surchargée par une variable d'environnement.
+export LOC="${LOC:-francecentral}"     # seule région retenue (README, section 2)
+export RG="${RG:-rg-churn}"
+export ST="${ST:-stchurnpipe}"         # compte de stockage : unique au monde, minuscules, sans tiret
+export COSMOS="${COSMOS:-cosmos-churn}" # unique au monde
+export FUNC="${FUNC:-func-churn}"       # unique au monde (<nom>.azurewebsites.net)
+export AI="${AI:-appi-churn}"           # créé par infra/monitoring.sh (membre 4)
+export LAW="${LAW:-law-churn}"          # créé par infra/monitoring.sh (membre 4)
+export API_APP="${API_APP:-api-churn}"  # Container App de l'API (membre 2)
+export EQ="${EQ:-churn}"                # étiquette equipe=<nom> du groupe de ressources
 export QUEUE="inference-requests"

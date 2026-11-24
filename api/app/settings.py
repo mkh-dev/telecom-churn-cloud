@@ -22,7 +22,6 @@ class Settings:
     model_version: str
     risk_threshold: float
     appinsights_connection_string: str | None
-    git_sha: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -35,6 +34,4 @@ class Settings:
             model_version=os.getenv("MODEL_VERSION") or version_from_path(model_path),
             risk_threshold=threshold,
             appinsights_connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING") or None,
-            # Inscrit dans l'image au build (docker build --build-arg GIT_SHA=...), voir Dockerfile
-            git_sha=os.getenv("GIT_SHA") or "unknown",
         )
