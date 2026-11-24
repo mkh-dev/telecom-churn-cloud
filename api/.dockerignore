@@ -1,0 +1,7 @@
+# Seuls app/, models/ et requirements.txt entrent dans l'image
+*
+!app/
+!models/
+!requirements.txt
+**/__pycache__
+**/*.pyc
