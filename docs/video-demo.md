@@ -11,8 +11,8 @@ Avant de commencer : pipeline déployé, tableau de bord ouvert, onglets du port
 | 1:15-2:30 | Portail : conteneur `input/` | **Déposer `clients-demo.csv`.** Montrer le message dans la file `inference-requests`, puis le fichier dans `output/` et le document dans Cosmos DB (Explorateur de données). |
 | 2:30-3:30 | Tableau de bord | Actualiser : le nouveau fichier apparaît en haut. Commenter les indicateurs, le graphique de risques, filtrer « Élevé », rechercher un client, export CSV. Durée de traitement sous l'objectif de 2 s. |
 | 3:30-4:00 | Portail : `input/` puis `rejected/` | **Déposer `clients-invalide.csv`** : il part dans `rejected/`, pas d'appel à l'API. |
-| 4:00-4:40 | Application Insights | Carte d'application, requête KQL 1 (temps de réponse), requête 3 (santé du pipeline), liste des alertes ; montrer un e-mail d'alerte reçu. |
-| 4:40-5:00 | GitHub Actions | Un run vert de `CI` (4 jobs) et de `Deploy`. Conclusion : coût (rapport de coûts), limites, pistes (A/B v2). |
+| 4:00-4:40 | Application Insights | Carte d'application, requêtes KQL 1 (inférences par heure), 2 (5 fichiers les plus lents) et 3 (codes HTTP) ; l'alerte `alert-fichier-rejete` déclenchée par le dépôt invalide et l'e-mail reçu. |
+| 4:40-5:00 | GitHub Actions | Un run vert de `CI` (4 jobs) et de `Deploy` (connexion OIDC sans secret, `/version` renvoie le commit). Conclusion : coût (rapport de coûts), limites, pistes (A/B v2). |
 
 Conseils : couper les temps d'attente du pipeline au montage ; zoomer le navigateur à 125 % ; ne jamais montrer
 de clé, chaîne de connexion ou adresse e-mail à l'écran.

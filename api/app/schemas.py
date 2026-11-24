@@ -72,6 +72,7 @@ class Health(BaseModel):
 class Version(BaseModel):
     api_version: str
     model_version: str
+    commit: str  # SHA court du commit de l'image (GIT_SHA, injecté par la CI) ; "dev" en local
 
 
 class Metrics(BaseModel):

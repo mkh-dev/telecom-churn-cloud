@@ -18,8 +18,10 @@ FROM python:3.12-slim
 
 # Modèle chargé au démarrage ; une autre révision (A/B) peut surcharger MODEL_PATH / MODEL_VERSION
 ARG MODEL_FILE=model-1.0.0.joblib
+# Commit de l'image, renvoyé par GET /version (passé par la CI : --build-arg GIT_SHA=<sha court>)
+ARG GIT_SHA=dev
 
-ENV PATH="/opt/venv/bin:$PATH" \
+ENV PATH="/opt/venv/bin:$PATH"     GIT_SHA=${GIT_SHA} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MODEL_PATH=/app/models/${MODEL_FILE}

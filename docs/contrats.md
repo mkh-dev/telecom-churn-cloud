@@ -45,12 +45,20 @@ Base `pipeline`, conteneur `inferences`, clé de partition `/day`. Un document p
 {"id": "clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F", "day": "2026-11-25", "fileName": "clients-2026-11-25.csv", "timestamp": "2026-11-25T10:42:09Z", "nCustomers": 120, "nHighRisk": 31, "churnRate": 0.258, "modelVersion": "1.0.0", "durationMs": 1840, "status": "ok"}
 ```
 
-## 5. API `GET /api/recent` (membres 3 et 4) — proposition du membre 4, à valider en revue
+## 5. API `GET /api/recent` (membres 3 et 4) — implémentée par la fonction `recent`
 
 Fonction HTTP `recent` de la Function App (préfixe de route par défaut `api`), appelée par le tableau de bord
-depuis le navigateur : **CORS** à autoriser pour l'origine du site web statique (`infra/monitoring.sh` le fait).
+depuis le navigateur : **CORS** limité à l'origine du site web statique (`infra/pipeline/01_pipeline.sh`).
 
-Requête : `GET /api/recent?limit=20` (`limit` entre 1 et 100, 20 par défaut).
+Requête : `GET /api/recent?limit=20` (`limit` entre 1 et 50, 20 par défaut).
+
+**Réponse réelle** : voir [`docs/exemples-pipeline/api_recent_reponse.json`](exemples-pipeline/api_recent_reponse.json).
+Chaque document contient en plus `nMediumRisk`, `nChurn`, `avgProbability`, `apiLatencyMs`, `outputBlob` et
+`topRisk` (les 5 clients les plus à risque). Le champ `latest` ci-dessous n'est **pas** renvoyé : le tableau de
+bord affiche alors les `topRisk` du dernier fichier et calcule la répartition élevé / moyen / faible avec
+`nHighRisk` et `nMediumRisk`.
+
+Format accepté par le tableau de bord (proposition initiale) :
 
 Réponse (`200`, `application/json`) :
 

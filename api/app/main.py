@@ -132,7 +132,11 @@ def health(request: Request):
 
 @app.get("/version", response_model=Version)
 def version(request: Request) -> Version:
-    return Version(api_version=__version__, model_version=request.app.state.settings.model_version)
+    return Version(
+        api_version=__version__,
+        model_version=request.app.state.settings.model_version,
+        commit=os.getenv("GIT_SHA") or "dev",
+    )
 
 
 @app.get("/metrics", response_model=Metrics)
