@@ -36,6 +36,37 @@ INT_COLUMNS = ("SeniorCitizen", "tenure")
 FLOAT_COLUMNS = ("MonthlyCharges", "TotalCharges")
 NULLABLE_COLUMNS = ("TotalCharges",)  # vide pour tenure = 0 : le modèle l'impute
 
+# Valeurs acceptées par l'API (api/app/schemas.py, classe Customer). Un fichier qui ne les
+# respecte pas recevrait un 422 : on le rejette dès le dispatcher (rejected/) au lieu de le
+# laisser échouer 5 fois dans le worker. Le test test_allowed_values_match_api_schema
+# vérifie que cette liste reste identique au schéma de l'API.
+_YES_NO = ("Yes", "No")
+_INTERNET = ("Yes", "No", "No internet service")
+ALLOWED_VALUES: dict[str, tuple[str, ...]] = {
+    "gender": ("Male", "Female"),
+    "Partner": _YES_NO,
+    "Dependents": _YES_NO,
+    "PhoneService": _YES_NO,
+    "MultipleLines": ("Yes", "No", "No phone service"),
+    "InternetService": ("DSL", "Fiber optic", "No"),
+    "OnlineSecurity": _INTERNET,
+    "OnlineBackup": _INTERNET,
+    "DeviceProtection": _INTERNET,
+    "TechSupport": _INTERNET,
+    "StreamingTV": _INTERNET,
+    "StreamingMovies": _INTERNET,
+    "Contract": ("Month-to-month", "One year", "Two year"),
+    "PaperlessBilling": _YES_NO,
+    "PaymentMethod": ("Electronic check", "Mailed check", "Bank transfer (automatic)", "Credit card (automatic)"),
+}
+# Bornes numériques de l'API : (minimum, maximum ou None)
+NUMERIC_BOUNDS: dict[str, tuple[float, float | None]] = {
+    "SeniorCitizen": (0, 1),
+    "tenure": (0, None),
+    "MonthlyCharges": (0, None),
+    "TotalCharges": (0, None),
+}
+
 # Seuils de risque du contrat §2 (mêmes valeurs que churn_model.HIGH_RISK / MEDIUM_RISK)
 HIGH_RISK, MEDIUM_RISK = 0.7, 0.4
 
@@ -169,8 +200,21 @@ def parse_and_validate(content: bytes, settings: Settings) -> tuple[list[dict[st
         for col in (*INT_COLUMNS, *FLOAT_COLUMNS):
             try:
                 row[col] = _to_number(row.get(col), col)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 return None, Rejection("bad_value", f"Ligne {line_no} : {col}={row.get(col)!r} n'est pas un nombre")
+            value = row[col]
+            if value is not None:
+                low, high = NUMERIC_BOUNDS.get(col, (None, None))
+                if value != value or value in (float("inf"), float("-inf")):  # NaN / infini
+                    return None, Rejection("bad_value", f"Ligne {line_no} : {col} n'est pas un nombre fini")
+                if (low is not None and value < low) or (high is not None and value > high):
+                    bounds = f"[{low}, {high}]" if high is not None else f">= {low}"
+                    return None, Rejection("bad_value", f"Ligne {line_no} : {col}={value} hors limites {bounds}")
+        for col, allowed in ALLOWED_VALUES.items():
+            if col in settings.required_columns and row.get(col) not in allowed:
+                return None, Rejection(
+                    "bad_value", f"Ligne {line_no} : {col}={row.get(col)!r} non autorisé ({' / '.join(allowed)})"
+                )
         row.pop(LABEL_COLUMN, None)
         rows.append({c: row[c] for c in INPUT_COLUMNS if c in row})
 

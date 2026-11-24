@@ -11,7 +11,9 @@ ROOT = FUNCTIONS.parent
 sys.path.insert(0, str(FUNCTIONS))
 
 from pipeline_core import (  # noqa: E402
+    ALLOWED_VALUES,
     INPUT_COLUMNS,
+    NUMERIC_BOUNDS,
     ApiError,
     PoisonMessageError,
     Settings,
@@ -111,6 +113,82 @@ def test_blank_total_charges_becomes_null_and_churn_column_is_dropped():
         lines[i] += ",No"
     rows, rej = parse_and_validate("\n".join(lines).encode(), S)
     assert rej is None and rows[0]["TotalCharges"] is None and "Churn" not in rows[0]
+
+
+def _with_field(column: str, value: str) -> bytes:
+    lines = valid_csv().decode().splitlines()
+    fields = lines[1].split(",")
+    fields[INPUT_COLUMNS.index(column)] = value
+    lines[1] = ",".join(fields)
+    return "\n".join(lines).encode()
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("Contract", "Monthly"),
+        ("gender", "male"),
+        ("PaymentMethod", "Cash"),
+        ("SeniorCitizen", "2"),
+        ("tenure", "-1"),
+        ("MonthlyCharges", "-5"),
+        ("TotalCharges", "nan"),
+        ("tenure", "inf"),
+    ],
+)
+def test_values_refused_by_the_api_are_rejected_by_the_dispatcher(column, value):
+    """Sans ce contrôle, l'API répondrait 422 et le fichier finirait en file poison."""
+    _, rej = parse_and_validate(_with_field(column, value), S)
+    assert rej is not None and rej.code == "bad_value" and column in rej.message
+
+
+def _api_customer_schema() -> tuple[dict[str, tuple[str, ...]], dict[str, tuple]]:
+    """Lit api/app/schemas.py SANS importer pydantic : valeurs Literal et bornes ge/le de Customer."""
+    import ast
+
+    tree = ast.parse((ROOT / "api" / "app" / "schemas.py").read_text(encoding="utf-8"))
+
+    def literal_values(node):
+        if isinstance(node, ast.Subscript) and getattr(node.value, "id", None) == "Literal":
+            elts = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+            return tuple(e.value for e in elts)
+        return None
+
+    aliases, amount_bounds = {}, {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
+            values = literal_values(stmt.value)
+            if values:
+                aliases[stmt.targets[0].id] = values
+            if stmt.targets[0].id == "Amount":
+                amount_bounds = {k.arg: k.value.value for c in ast.walk(stmt.value) if isinstance(c, ast.Call)
+                                 for k in c.keywords if k.arg in ("ge", "le")}  # fmt: skip
+    customer = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Customer")
+    allowed, bounds = {}, {}
+    for stmt in customer.body:
+        if not isinstance(stmt, ast.AnnAssign):
+            continue
+        name, ann = stmt.target.id, stmt.annotation
+        values = literal_values(ann) or (aliases.get(ann.id) if isinstance(ann, ast.Name) else None)
+        if values:
+            allowed[name] = values
+        src = ast.unparse(ann)
+        if "Amount" in src:
+            bounds[name] = (amount_bounds.get("ge"), amount_bounds.get("le"))
+        else:
+            kw = {k.arg: k.value.value for c in ast.walk(ann) if isinstance(c, ast.Call) for k in c.keywords
+                  if k.arg in ("ge", "le")}  # fmt: skip
+            if kw:
+                bounds[name] = (kw.get("ge"), kw.get("le"))
+    return allowed, bounds
+
+
+def test_allowed_values_match_api_schema():
+    if not (ROOT / "api" / "app" / "schemas.py").exists():
+        pytest.skip("api/ absent")
+    allowed, bounds = _api_customer_schema()
+    assert {k: set(v) for k, v in allowed.items()} == {k: set(v) for k, v in ALLOWED_VALUES.items()}
+    assert bounds == NUMERIC_BOUNDS
 
 
 def test_too_many_rows():
