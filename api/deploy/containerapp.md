@@ -1,12 +1,23 @@
-# Déploiement de l'API sur Azure Container Apps (pour le membre 3)
+# Déploiement de l'API sur Azure Container Apps
 
-Paramètres à appliquer ; **rien n'a été créé par le membre 2**. Remplacer `<rg>`, `<app>` et `<version>`.
+**Déployée le 24/11/2026** par le membre 2 avec [`infra/api/deploy_api.sh`](../../infra/api/deploy_api.sh) :
+groupe `rg-churn`, environnement `cae-churn`, application `api-churn`, France Central.
+
+URL publique : https://api-churn.salmonsmoke-322316a5.francecentral.azurecontainerapps.io
+
+```bash
+bash infra/api/deploy_api.sh                      # crée ou met à jour (idempotent)
+IMAGE_TAG=sha-<7 car.> bash infra/api/deploy_api.sh # déploie un commit précis (GET /version renvoie son SHA)
+```
+
+Le script applique les paramètres ci-dessous. Les commandes détaillées restent ici pour référence ;
+remplacer `<rg>` par `rg-churn`, `<app>` par `api-churn` et `<version>` par une étiquette de l'image.
 
 ## Paramètres
 
 | Paramètre | Valeur |
 |---|---|
-| Image | `ghcr.io/mkh-dev/telecom-churn-cloud/api:<version>` (ex. `0.2.0`, ou `sha-<7 car.>`) |
+| Image | `ghcr.io/mkh-dev/telecom-churn-cloud/api:<version>` (ex. `0.3.0`, ou `sha-<7 car.>`) |
 | Plateforme de l'image | `linux/amd64` |
 | Ressources | 0,25 vCPU / 0,5 Gi |
 | Réplicas | min 0, max 2 |

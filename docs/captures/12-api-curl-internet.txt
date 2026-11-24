@@ -1,0 +1,27 @@
+# curl depuis Internet vers l'API déployée (2026-11-24 10:39 UTC)
+# URL=https://api-churn.salmonsmoke-322316a5.francecentral.azurecontainerapps.io
+# lot-1000-clients.json : 1 000 clients construits à partir de api/dev/sample_request.json
+
+$ curl -s $URL/health
+{"status":"ok","model_loaded":true,"model_load_time_ms":12148.78}
+
+$ curl -s $URL/version
+{"api_version":"0.2.0","model_version":"1.0.0"}
+
+$ curl -s -X POST $URL/predict -H 'Content-Type: application/json' -d @api/dev/sample_request.json
+{"predictions":[{"customerID":"7590-VHVEG","churn_probability":0.8021,"churn":true,"churn_prediction":1,"risk_level":"élevé"},{"customerID":"5575-GNVDE","churn_probability":0.119,"churn":false,"churn_prediction":0,"risk_level":"faible"},{"customerID":"3668-QPYBK","churn_probability":0.5319,"churn":true,"churn_prediction":1,"risk_level":"moyen"},{"customerID":"7795-CFOCW","churn_probability":0.0817,"churn":false,"churn_prediction":0,"risk_level":"faible"},{"customerID":"4472-LVYGI","churn_probability":0.2986,"churn":false,"churn_prediction":0,"risk_level":"faible"}],"model_version":"1.0.0","latency_ms":11.53}
+
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST $URL/predict -H 'Content-Type: application/json' -d '{"customers": []}'
+422
+
+
+$ curl -s -o /dev/null -w '%{http_code}\n' -X POST $URL/predict
+422
+
+
+$ curl -s -o /dev/null -w 'HTTP %{http_code} en %{time_total} s\n' -X POST $URL/predict -H 'Content-Type: application/json' -d @lot-1000-clients.json
+HTTP 200 en 0.360799 s
+
+
+$ curl -s $URL/metrics
+{"calls":4,"avg_latency_ms":48.73,"customers_scored":2010,"errors":4}

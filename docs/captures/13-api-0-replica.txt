@@ -1,0 +1,15 @@
+# Preuve en ligne de commande : l'API est à 0 réplica au repos (2026-11-24 10:51 UTC)
+
+$ az containerapp replica list -g rg-churn -n api-churn --query "length(@)"
+0
+
+$ az containerapp revision list -g rg-churn -n api-churn --query "[].{revision:name, replicas:properties.replicas, trafic:properties.trafficWeight}" -o table
+Revision           Replicas    Trafic
+-----------------  ----------  --------
+api-churn--latest  0           100
+
+$ az containerapp show -g rg-churn -n api-churn --query properties.template.scale
+{
+  "maxReplicas": 2,
+  "minReplicas": 0
+}

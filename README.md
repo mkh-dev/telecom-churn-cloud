@@ -137,6 +137,16 @@ Le modèle est choisi par la variable `MODEL_PATH` : `model-1.0.0.joblib` (régr
 `model-2.0.0.joblib` (Random Forest) pour une seconde révision en A/B, sans changer le code. Latence mesurée
 pour 1 000 clients : 8 ms (1.0.0) et 35 ms (2.0.0).
 
+**En ligne** (Azure Container Apps, France Central) : https://api-churn.salmonsmoke-322316a5.francecentral.azurecontainerapps.io
+— déploiement : [`infra/api/deploy_api.sh`](infra/api/deploy_api.sh) ; preuve d'un appel depuis Internet :
+[`docs/captures/12-api-curl-internet.txt`](docs/captures/12-api-curl-internet.txt). Au repos, l'API descend à
+0 réplica (capture [`docs/captures/13-api-0-replica.png`](docs/captures/13-api-0-replica.png)) et redémarre au premier appel (démarrage à froid de
+10 à 15 s sur 0,25 vCPU, couvert par les nouvelles tentatives du worker).
+
+**Coûts** : budget de 23 € (≈ 25 $) par mois avec alertes à 50, 80 et 100 %, relevés et suppression finale
+dans [`docs/rapport-couts.md`](docs/rapport-couts.md) (scripts `infra/budget.sh`, `infra/cost_report.sh`,
+`infra/teardown.sh`).
+
 ## 4. Pipeline événementiel (membre 3)
 
 Documentation complète : [`docs/pipeline.md`](docs/pipeline.md). Code : `functions/`. Scripts Azure : `infra/pipeline/`.
