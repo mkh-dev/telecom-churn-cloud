@@ -44,3 +44,36 @@ Base `pipeline`, conteneur `inferences`, clé de partition `/day`. Un document p
 ```json
 {"id": "clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F", "day": "2026-11-25", "fileName": "clients-2026-11-25.csv", "timestamp": "2026-11-25T10:42:09Z", "nCustomers": 120, "nHighRisk": 31, "churnRate": 0.258, "modelVersion": "1.0.0", "durationMs": 1840, "status": "ok"}
 ```
+
+## 5. API `GET /api/recent` (membres 3 et 4) — proposition du membre 4, à valider en revue
+
+Fonction HTTP `recent` de la Function App (préfixe de route par défaut `api`), appelée par le tableau de bord
+depuis le navigateur : **CORS** à autoriser pour l'origine du site web statique (`infra/monitoring.sh` le fait).
+
+Requête : `GET /api/recent?limit=20` (`limit` entre 1 et 100, 20 par défaut).
+
+Réponse (`200`, `application/json`) :
+
+```json
+{
+  "generatedAt": "2026-11-25T10:45:00Z",
+  "count": 1,
+  "items": [
+    {"id": "clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F", "day": "2026-11-25", "fileName": "clients-2026-11-25.csv", "timestamp": "2026-11-25T10:42:09Z", "nCustomers": 120, "nHighRisk": 31, "churnRate": 0.258, "modelVersion": "1.0.0", "durationMs": 1840, "status": "ok"}
+  ],
+  "latest": {
+    "fileName": "clients-2026-11-25.csv",
+    "modelVersion": "1.0.0",
+    "timestamp": "2026-11-25T10:42:09Z",
+    "predictions": [{"customerID": "7590-VHVEG", "churn_prediction": 1, "churn_probability": 0.82, "risk_level": "élevé"}]
+  }
+}
+```
+
+- `items` : documents Cosmos DB de la section 4, **du plus récent au plus ancien**
+  (`SELECT TOP @limit * FROM c ORDER BY c.timestamp DESC`, requête inter-partitions).
+- `latest` : facultatif. Contenu du fichier `output/` du dernier document `status = "ok"` (liste `predictions`
+  de la section 2). S'il est absent, le tableau de bord affiche seulement les agrégats.
+- `status` : `ok` ou `error` (fichier rejeté ou échec du worker) ; un document en erreur peut avoir `nCustomers = 0`.
+- Le tableau de bord accepte aussi un simple tableau de documents (`[...]`) pour faciliter les premiers tests.
+- Exemple complet (données fictives) : `web/demo/recent.json`.
