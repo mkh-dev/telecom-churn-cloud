@@ -34,7 +34,8 @@ Les formats échangés entre les parties sont dans [`docs/contrats.md`](docs/con
 - **Jeu de données** : IBM Telco Customer Churn, dépôt [IBM/telco-customer-churn-on-icp4d](https://github.com/IBM/telco-customer-churn-on-icp4d), licence Apache-2.0. Environ 7 000 clients, 21 colonnes, moins de 1 Mo.
 - **Tâche** : classification binaire, le client part-il (`Churn = Yes`) ?
 - **Préparation** : `TotalCharges` converti en nombre (valeurs vides imputées par la médiane), numériques normalisées, catégorielles en one-hot, le tout dans un seul `Pipeline` scikit-learn exporté.
-- **Protocole** : jeu de test stratifié de 20 %, graine 42, versions figées dans `model/requirements.txt`.
+- **Protocole** : jeu de test stratifié de 20 %, graine 42, versions figées dans `model/requirements.txt` (Python 3.12, numpy 2.5.3, pandas 3.0.5, scikit-learn 1.9.1, joblib 1.6.0).
+- **Fichiers produits** (versionnés dans le dépôt) : `model/artifacts/model-1.0.0.joblib`, `metrics-1.0.0.json`, `sample-clients.csv` (fichier de démo pour le pipeline) et une copie du modèle dans `api/models/`. L'API doit installer les mêmes versions de numpy, pandas, scikit-learn et joblib, sinon le modèle ne se charge pas.
 - **Modèles** : régression logistique et Random Forest (`class_weight="balanced"`), comparés à une référence naïve qui prédit toujours « ne part pas ». Le meilleur en ROC-AUC devient `model-1.0.0.joblib`.
 
 Reproduire :
