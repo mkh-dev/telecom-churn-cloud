@@ -46,16 +46,19 @@ python train.py        # télécharge les données, entraîne, écrit artifacts/
 pytest -q tests
 ```
 
-Résultats sur le jeu de test (à compléter avec `model/artifacts/metrics-1.0.0.json`) :
+Résultats sur le jeu de test (1 409 clients, 26,5 % de churn ; détail dans `model/artifacts/metrics-1.0.0.json`) :
 
 | Modèle | ROC-AUC | F1 churn | Précision | Rappel | Accuracy |
 |---|---|---|---|---|---|
-| Référence naïve (toujours « Non ») | 0,500 | 0 | 0 | 0 | |
-| Régression logistique | | | | | |
-| Random Forest | | | | | |
+| Référence naïve (toujours « Non ») | 0,500 | 0,000 | 0,000 | 0,000 | 0,735 |
+| **Régression logistique (v1.0.0)** | **0,841** | 0,614 | 0,504 | 0,783 | 0,738 |
+| Random Forest | 0,840 | 0,632 | 0,535 | 0,773 | 0,761 |
 
-L'accuracy seule est trompeuse : la référence naïve dépasse 70 % d'accuracy sans détecter un seul départ.
-Version retenue : `model-1.0.0.joblib` (taille : … Mo, latence : … ms pour 1 000 clients).
+L'accuracy seule est trompeuse : la référence naïve obtient 73,5 % d'accuracy sans détecter un seul départ (F1 = 0).
+Les deux modèles détectent environ 78 % des clients qui partent (rappel). La régression logistique est retenue :
+meilleure ROC-AUC (à égalité ou presque avec la Random Forest), plus légère et ses coefficients sont explicables.
+
+Version retenue : `model-1.0.0.joblib`, environ 3 Ko (limite : 100 Mo), 16 ms pour prédire un lot de 1 000 clients sur CPU (limite : 1 s).
 
 ## Sections à compléter
 
