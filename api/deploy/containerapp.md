@@ -6,7 +6,7 @@ Paramètres à appliquer ; **rien n'a été créé par le membre 2**. Remplacer 
 
 | Paramètre | Valeur |
 |---|---|
-| Image | `ghcr.io/mkh-dev/telecom-churn-cloud/api:<version>` (ex. `0.1.0`, ou `sha-<7 car.>`) |
+| Image | `ghcr.io/mkh-dev/telecom-churn-cloud/api:<version>` (ex. `0.2.0`, ou `sha-<7 car.>`) |
 | Plateforme de l'image | `linux/amd64` |
 | Ressources | 0,25 vCPU / 0,5 Gi |
 | Réplicas | min 0, max 2 |
@@ -99,9 +99,11 @@ curl -s -X POST $URL/predict -H 'Content-Type: application/json' -d @api/dev/sam
 curl -s $URL/metrics
 ```
 
-## Bonus A/B (plus tard)
+## Bonus A/B
 
-Le code ne change pas : les deux modèles sont dans l'image (`api/models/`), seule la révision change.
+Le code ne change pas : `model-1.0.0` (régression logistique) et `model-2.0.0` (Random Forest) sont tous
+les deux dans l'image (`/app/models/`), seule la révision change. Testé en local : les deux conteneurs sont
+`healthy` et répondent en moins de 0,1 s pour 1 000 clients.
 
 ```bash
 az containerapp revision set-mode -g <rg> -n <app> --mode multiple
