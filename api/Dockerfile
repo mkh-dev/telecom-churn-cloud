@@ -17,7 +17,7 @@ RUN pip install -r requirements.txt \
 FROM python:3.12-slim
 
 # Modèle chargé au démarrage ; une autre révision (A/B) peut surcharger MODEL_PATH / MODEL_VERSION
-ARG MODEL_FILE=model-0.1.0.joblib
+ARG MODEL_FILE=model-1.0.0.joblib
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
