@@ -61,11 +61,47 @@ meilleure ROC-AUC (à égalité ou presque avec la Random Forest), plus légère
 
 Version retenue : `model-1.0.0.joblib`, environ 3 Ko (limite : 100 Mo), 16 ms pour prédire un lot de 1 000 clients sur CPU (limite : 1 s).
 
+## 2. Pipeline événementiel (membre 3)
+
+Documentation complète : [`docs/pipeline.md`](docs/pipeline.md). Code : `functions/`. Scripts Azure : `infra/pipeline/`.
+
+Une seule Function App Flex Consumption (Python 3.12) contient trois fonctions :
+
+| Fonction | Déclencheur | Rôle |
+|---|---|---|
+| `dispatcher` | Event Grid `BlobCreated` filtré sur `input/` | Vérifie l'extension, la taille, l'UTF-8, les 20 colonnes, les types et les 1 000 lignes maximum. Pose un ticket dans `inference-requests`, ou copie le fichier dans `rejected/` avec le motif |
+| `worker` | File `inference-requests` | Appelle `POST /predict` (un appel par fichier, délai de 20 s, client HTTP réutilisé). Écrit `output/<nom>_<etag>.json` et fait un upsert dans Cosmos DB (idempotent) |
+| `recent` | HTTP `GET /api/recent` | Renvoie les 20 dernières inférences pour le tableau de bord (CORS limité au site) |
+
+En cas d'échec, `host.json` fixe `maxDequeueCount = 5` avec une visibilité de 10 s. Le message part ensuite dans `inference-requests-poison` ; le scénario « API coupée » est documenté dans `docs/pipeline.md` §5.
+
+Les connexions passent par l'identité managée, sans aucun secret.
+
+Exemple d'événement Event Grid (extrait de [`docs/exemples-pipeline/evenement_eventgrid.json`](docs/exemples-pipeline/evenement_eventgrid.json)) :
+
+```json
+{"subject": "/blobServices/default/containers/input/blobs/clients-2026-11-25.csv",
+ "eventType": "Microsoft.Storage.BlobCreated", "eventTime": "2026-11-25T10:42:07.1234567Z",
+ "data": {"api": "PutBlob", "eTag": "0x8DD0A1B2C3D4E5F", "contentLength": 4123,
+          "url": "https://st<equipe>pipe.blob.core.windows.net/input/clients-2026-11-25.csv"}}
+```
+
+Message de file correspondant :
+
+```json
+{"blobName": "input/clients-2026-11-25.csv", "etag": "0x8DD0A1B2C3D4E5F", "size": 4123, "rows": 20, "timestamp": "2026-11-25T10:42:07Z"}
+```
+
+Tester en local, sans Azure :
+
+```bash
+pip install -r model/requirements.txt && ruff check . && pytest functions/tests
+```
+
 ## Sections à compléter
 
 - Schéma d'architecture, région choisie et justification (membre 2)
 - API et exemple `curl` (membre 2)
-- Exemple d'événement Event Grid et de message de file (membre 3)
 - Déploiement pas à pas (membres 2 et 4)
 - 3 requêtes KQL avec captures (membre 4)
 - Restrictions Azure for Students rencontrées et solutions (tous)
