@@ -61,10 +61,82 @@ meilleure ROC-AUC (à égalité ou presque avec la Random Forest), plus légère
 
 Version retenue : `model-1.0.0.joblib`, environ 3 Ko (limite : 100 Mo), 16 ms pour prédire un lot de 1 000 clients sur CPU (limite : 1 s).
 
+## 2. Architecture et région (membre 2)
+
+```mermaid
+flowchart LR
+    U([Export CRM<br/>CSV clients]) -->|dépôt| IN[(Blob Storage<br/>input/)]
+    IN -->|BlobCreated| EG{{Event Grid}}
+    EG --> D[Function<br/>dispatcher]
+    D -->|message| Q[[Storage Queue<br/>inference-requests]]
+    Q --> W[Function<br/>worker]
+    W -->|POST /predict| API[API FastAPI<br/>Container Apps]
+    API -.->|image| GHCR[(GHCR)]
+    W --> OUT[(Blob Storage<br/>output/)]
+    W --> DB[(Cosmos DB<br/>pipeline/inferences)]
+    DB --> WEB[Tableau de bord]
+    API -.->|télémétrie| AI[Application Insights]
+    D -.-> AI
+    W -.-> AI
+```
+
+1. Un CSV de clients (1 à 1 000 lignes) est déposé dans le conteneur `input/` du compte de stockage.
+2. Event Grid publie l'événement `BlobCreated` ; la Function *dispatcher* valide le fichier et met un message
+   dans la file `inference-requests` (format : `docs/contrats.md`, section 3).
+3. La Function *worker* lit le CSV et l'envoie en un seul appel à `POST /predict` de l'API.
+4. Les prédictions par client vont dans `output/`, le résumé du fichier dans Cosmos DB, que lit le tableau de bord.
+5. L'API, les Functions et la CI remontent leur télémétrie dans Application Insights.
+
+La file découple la réception de l'inférence : si l'API redémarre (démarrage à froid avec `min-replicas 0`),
+les messages attendent et sont retraités au lieu d'être perdus.
+
+**Région : France Central (`francecentral`).** Justification :
+
+- **Autorisée par la souscription** : la stratégie Azure for Students « Allowed resource deployment regions »
+  n'accepte que `francecentral`, `germanywestcentral`, `italynorth`, `norwayeast` et `denmarkeast`.
+- **Tous les services du projet y sont disponibles** : Container Apps, Functions, Storage, Event Grid,
+  Cosmos DB et Application Insights (vérifié avec `az provider show`). `denmarkeast` n'a pas Container Apps.
+- **Latence la plus faible depuis Paris**, pour le dépôt des fichiers et la démonstration.
+- **Données dans l'Union européenne, en France** (RGPD) : les fichiers CRM contiennent des données de clients.
+- **Une seule région pour toutes les ressources** : pas de trafic sortant facturé entre régions et une
+  latence minimale entre le worker et l'API.
+
+## 3. API d'inférence (membre 2)
+
+API FastAPI dans `api/` (détails, contrat complet et configuration : [`api/README.md`](api/README.md)).
+Image Docker multi-étapes `python:3.12-slim`, utilisateur non root, environ 123 Mo compressée, publiée sur
+`ghcr.io/mkh-dev/telecom-churn-cloud/api` et déployée sur Azure Container Apps (0,25 vCPU, 0,5 Gi, 0 à 2 réplicas).
+
+| Endpoint | Rôle |
+|---|---|
+| `POST /predict` | Prédit le churn de 1 à 1 000 clients (422 si l'entrée est invalide) |
+| `GET /health` | État du modèle ; 503 s'il n'est pas chargé (sondes liveness et readiness) |
+| `GET /version` | Versions de l'API et du modèle |
+| `GET /metrics` | Appels, latence moyenne, clients scorés, erreurs |
+
+Exemple (en local : `URL=http://localhost:8000`) :
+
+```bash
+curl -s -X POST $URL/predict -H 'Content-Type: application/json' -d @api/dev/sample_request.json
+```
+
+```json
+{
+  "predictions": [
+    {"customerID": "7590-VHVEG", "churn_probability": 0.8021, "churn": true, "churn_prediction": 1, "risk_level": "élevé"},
+    {"customerID": "5575-GNVDE", "churn_probability": 0.119, "churn": false, "churn_prediction": 0, "risk_level": "faible"}
+  ],
+  "model_version": "1.0.0",
+  "latency_ms": 10.7
+}
+```
+
+Le modèle est choisi par la variable `MODEL_PATH` : `model-1.0.0.joblib` (régression logistique) par défaut,
+`model-2.0.0.joblib` (Random Forest) pour une seconde révision en A/B, sans changer le code. Latence mesurée
+pour 1 000 clients : 8 ms (1.0.0) et 35 ms (2.0.0).
+
 ## Sections à compléter
 
-- Schéma d'architecture, région choisie et justification (membre 2)
-- API et exemple `curl` (membre 2)
 - Exemple d'événement Event Grid et de message de file (membre 3)
 - Déploiement pas à pas (membres 2 et 4)
 - 3 requêtes KQL avec captures (membre 4)
