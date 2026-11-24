@@ -1,0 +1,68 @@
+{
+  "dataset": "IBM Telco Customer Churn (IBM/telco-customer-churn-on-icp4d, Apache-2.0)",
+  "n_customers": 7043,
+  "churn_rate": 0.2654,
+  "n_train": 5634,
+  "n_test": 1409,
+  "seed": 42,
+  "version": "1.0.0",
+  "chosen_model": "logreg",
+  "metrics_test": {
+    "baseline_always_no_churn": {
+      "roc_auc": 0.5,
+      "f1_churn": 0.0,
+      "precision_churn": 0.0,
+      "recall_churn": 0.0,
+      "accuracy": 0.7346,
+      "confusion_matrix [[TN, FP], [FN, TP]]": [
+        [
+          1035,
+          0
+        ],
+        [
+          374,
+          0
+        ]
+      ]
+    },
+    "logreg": {
+      "roc_auc": 0.8413,
+      "f1_churn": 0.6136,
+      "precision_churn": 0.5043,
+      "recall_churn": 0.7834,
+      "accuracy": 0.7381,
+      "confusion_matrix [[TN, FP], [FN, TP]]": [
+        [
+          747,
+          288
+        ],
+        [
+          81,
+          293
+        ]
+      ]
+    },
+    "rf": {
+      "roc_auc": 0.8397,
+      "f1_churn": 0.6324,
+      "precision_churn": 0.5352,
+      "recall_churn": 0.7727,
+      "accuracy": 0.7615,
+      "confusion_matrix [[TN, FP], [FN, TP]]": [
+        [
+          784,
+          251
+        ],
+        [
+          85,
+          289
+        ]
+      ]
+    }
+  },
+  "latency_ms_batch": {
+    "rows": 1000,
+    "ms": 15.8
+  },
+  "model_size_mb": 0.003
+}
