@@ -93,7 +93,9 @@ Pour le graphique, grouper `items` par `day` et calculer la somme de `nHighRisk`
 | `bad_encoding` | Fichier qui n'est pas en UTF-8 (ex. export Excel en Latin-1) |
 | `binary_content` | Octets nuls dans le fichier |
 | `bad_schema` | Une des 20 colonnes du contrat §1 est manquante, ou le séparateur n'est pas la virgule (la liste est donnée dans le motif) |
-| `bad_value` / `bad_row` | Valeur non numérique dans `tenure`, `MonthlyCharges`..., `customerID` vide, ou ligne mal formée |
+| `bad_value` / `bad_row` | Valeur refusée par l'API : nombre invalide, négatif ou infini, `SeniorCitizen` différent de 0/1, catégorie inconnue (ex. `Contract=Monthly`), `customerID` vide, ou ligne mal formée |
+
+Les valeurs autorisées sont celles de `api/app/schemas.py`. Le test `test_allowed_values_match_api_schema` relit ce fichier et échoue si les deux listes divergent. Sans ce contrôle, un fichier refusé par l'API (422) échouerait 5 fois dans le worker et finirait dans la file poison au lieu de `rejected/`.
 | `too_many_rows` / `no_rows` | Plus de 1 000 lignes (contrat §1), ou en-tête seul |
 
 Le fichier rejeté est copié dans `rejected/` avec la métadonnée `reason=<code>`. Un fichier `rejected/<nom>.reason.json` l'accompagne avec le message en clair.
@@ -142,7 +144,7 @@ En local, `RESULT_STORE=blob` enregistre les métadonnées dans `output/_meta/`,
 ## 7. Déployer sur Azure (abonnement d'intégration)
 
 ```bash
-# 1. Renseigner EQ et LOC dans infra/pipeline/env.sh (même région que le membre 2)
+# 1. Vérifier les noms dans infra/pipeline/env.sh (rg-churn, francecentral, stchurnpipe, func-churn...)
 #    Le membre 2 (propriétaire de l'abonnement) lance ce script : il crée des attributions de rôles.
 source infra/pipeline/env.sh
 bash infra/pipeline/01_pipeline.sh   # Cosmos DB en premier, puis stockage, file, Function App, rôles
@@ -159,26 +161,13 @@ bash infra/pipeline/03_demo.sh valide
 - `Storage Queue Data Contributor` sur le compte de stockage ;
 - `Cosmos DB Built-in Data Contributor` sur le plan de données Cosmos.
 
-**À ajouter par le membre 4**
+**Déploiement continu (`deploy.yml`, membre 4)**
 
-Dans `deploy.yml` :
+Le job `functions` publie ce dossier quand la variable GitHub `FUNCTIONAPP_NAME` (`func-churn`) et le secret `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` sont renseignés.
 
-```yaml
-      - uses: Azure/functions-action@v1
-        with:
-          app-name: func-<equipe>
-          package: functions
-          sku: flexconsumption
-          remote-build: true
-```
+Pour une Function App **Flex Consumption**, l'action `Azure/functions-action` doit recevoir `sku: flexconsumption`. Voir la remarque dans la PR d'intégration.
 
-Dans `ci.yml` :
-
-```yaml
-      - run: pip install -r model/requirements.txt && ruff check . && pytest functions/tests
-```
-
-Les tests n'ont besoin d'aucun paquet Azure. Les dépendances du modèle permettent de lancer en plus le test d'intégration avec le vrai modèle.
+**Intégration continue (`ci.yml`)** : le job `functions` lance `ruff check functions` et `pytest functions/tests`. Les tests n'ont besoin d'aucun paquet Azure.
 
 ## 8. Observabilité du pipeline (pour le membre 4)
 
@@ -240,7 +229,7 @@ traces
 - [ ] Abonnement Event Grid : capture du filtre `BlobCreated` et du préfixe `/blobServices/default/containers/input/`
 - [ ] Cosmos DB : Data Explorer, conteneur `inferences`, un document
 - [ ] Function App : les 3 fonctions listées, avec l'identité managée activée
-- [ ] `curl https://func-<equipe>.azurewebsites.net/api/recent`
+- [ ] `curl https://func-churn.azurewebsites.net/api/recent`
 
 ## 11. Questions possibles à la soutenance
 
