@@ -1,0 +1,17 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "PipelineStorage": "UseDevelopmentStorage=true",
+    "RESULT_STORE": "blob",
+    "API_URL": "http://localhost:8000",
+    "API_TIMEOUT_SECONDS": "10",
+    "MAX_FILE_BYTES": "1000000",
+    "MAX_ROWS": "1000"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "*"
+  }
+}

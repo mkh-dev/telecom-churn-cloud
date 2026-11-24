@@ -1,0 +1,42 @@
+{
+  "id": "clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F",
+  "day": "2026-11-25",
+  "fileName": "clients-2026-11-25.csv",
+  "timestamp": "2026-11-25T10:42:09Z",
+  "nCustomers": 20,
+  "nHighRisk": 4,
+  "churnRate": 0.4,
+  "modelVersion": "1.0.0",
+  "durationMs": 57.0,
+  "status": "ok",
+  "nMediumRisk": 4,
+  "nChurn": 8,
+  "avgProbability": 0.4031,
+  "topRisk": [
+    {
+      "customerID": "4706-AXVKM",
+      "churn_probability": 0.8536
+    },
+    {
+      "customerID": "2754-SDJRD",
+      "churn_probability": 0.8531
+    },
+    {
+      "customerID": "1379-FRVEB",
+      "churn_probability": 0.8204
+    },
+    {
+      "customerID": "4686-UXDML",
+      "churn_probability": 0.8061
+    },
+    {
+      "customerID": "2227-JRSJX",
+      "churn_probability": 0.6985
+    }
+  ],
+  "apiLatencyMs": 56.6,
+  "modelLatencyMs": 37.4,
+  "uploadedAt": "2026-11-25T10:42:07Z",
+  "etag": "0x8DD0A1B2C3D4E5F",
+  "outputBlob": "output/clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F.json"
+}

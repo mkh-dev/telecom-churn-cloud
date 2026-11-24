@@ -5,4 +5,4 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "RUF"]
 
 [lint.isort]
-known-first-party = ["app", "churn_model"]
+known-first-party = ["app", "churn_model", "pipeline_core", "stores"]

@@ -1,0 +1,20 @@
+[
+  {
+    "topic": "/subscriptions/<sub>/resourceGroups/rg-projet-<equipe>/providers/Microsoft.Storage/storageAccounts/st<equipe>pipe",
+    "subject": "/blobServices/default/containers/input/blobs/clients-2026-11-25.csv",
+    "eventType": "Microsoft.Storage.BlobCreated",
+    "id": "6f1c2b9e-701e-0034-2d4b-3e8c1b06a1f2",
+    "eventTime": "2026-11-25T10:42:07.1234567Z",
+    "dataVersion": "",
+    "metadataVersion": "1",
+    "data": {
+      "api": "PutBlob",
+      "eTag": "0x8DD0A1B2C3D4E5F",
+      "contentType": "text/csv",
+      "contentLength": 4123,
+      "blobType": "BlockBlob",
+      "url": "https://st<equipe>pipe.blob.core.windows.net/input/clients-2026-11-25.csv",
+      "sequencer": "00000000000000000000000000016f2a0000000000412bd4"
+    }
+  }
+]

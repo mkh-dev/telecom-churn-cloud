@@ -135,7 +135,44 @@ Le modèle est choisi par la variable `MODEL_PATH` : `model-1.0.0.joblib` (régr
 `model-2.0.0.joblib` (Random Forest) pour une seconde révision en A/B, sans changer le code. Latence mesurée
 pour 1 000 clients : 8 ms (1.0.0) et 35 ms (2.0.0).
 
-## 4. Tableau de bord (membre 4)
+## 4. Pipeline événementiel (membre 3)
+
+Documentation complète : [`docs/pipeline.md`](docs/pipeline.md). Code : `functions/`. Scripts Azure : `infra/pipeline/`.
+
+Une seule Function App Flex Consumption (Python 3.12) contient trois fonctions :
+
+| Fonction | Déclencheur | Rôle |
+|---|---|---|
+| `dispatcher` | Event Grid `BlobCreated` filtré sur `input/` | Vérifie l'extension, la taille, l'UTF-8, les 20 colonnes, les types et les 1 000 lignes maximum. Pose un ticket dans `inference-requests`, ou copie le fichier dans `rejected/` avec le motif |
+| `worker` | File `inference-requests` | Appelle `POST /predict` (un appel par fichier, délai de 20 s, client HTTP réutilisé). Écrit `output/<nom>_<etag>.json` et fait un upsert dans Cosmos DB (idempotent) |
+| `recent` | HTTP `GET /api/recent` | Renvoie les 20 dernières inférences pour le tableau de bord (CORS limité au site) |
+
+En cas d'échec, `host.json` fixe `maxDequeueCount = 5` avec une visibilité de 10 s. Le message part ensuite dans `inference-requests-poison` ; le scénario « API coupée » est documenté dans `docs/pipeline.md` §5.
+
+Les connexions passent par l'identité managée, sans aucun secret.
+
+Exemple d'événement Event Grid (extrait de [`docs/exemples-pipeline/evenement_eventgrid.json`](docs/exemples-pipeline/evenement_eventgrid.json)) :
+
+```json
+{"subject": "/blobServices/default/containers/input/blobs/clients-2026-11-25.csv",
+ "eventType": "Microsoft.Storage.BlobCreated", "eventTime": "2026-11-25T10:42:07.1234567Z",
+ "data": {"api": "PutBlob", "eTag": "0x8DD0A1B2C3D4E5F", "contentLength": 4123,
+          "url": "https://st<equipe>pipe.blob.core.windows.net/input/clients-2026-11-25.csv"}}
+```
+
+Message de file correspondant :
+
+```json
+{"blobName": "input/clients-2026-11-25.csv", "etag": "0x8DD0A1B2C3D4E5F", "size": 4123, "rows": 20, "timestamp": "2026-11-25T10:42:07Z"}
+```
+
+Tester en local, sans Azure :
+
+```bash
+pip install -r model/requirements.txt && ruff check . && pytest functions/tests
+```
+
+## 5. Tableau de bord (membre 4)
 
 Page statique `web/` (HTML, CSS, JavaScript, [Chart.js 4.4.1](https://www.chartjs.org/)), sans framework ni build,
 hébergée dans le **site web statique** du compte de stockage (`$web`). Elle lit `GET /api/recent`
@@ -159,7 +196,7 @@ python -m http.server 8080
 
 En production, `deploy.yml` réécrit `web/config.js` avec la variable GitHub `API_BASE_URL`.
 
-## 5. Intégration et déploiement continus (membre 4)
+## 6. Intégration et déploiement continus (membre 4)
 
 | Workflow | Déclencheur | Jobs |
 |---|---|---|
@@ -182,7 +219,7 @@ Azure for Students ne permet généralement pas de créer un principal de servic
 donc des secrets limités à une ressource (chaîne de connexion du stockage, profil de publication) plutôt qu'une
 connexion OIDC à toute la souscription.
 
-## 6. Supervision et alertes (membre 4)
+## 7. Supervision et alertes (membre 4)
 
 [`infra/monitoring.sh`](infra/monitoring.sh) crée, en `francecentral` :
 
@@ -220,7 +257,6 @@ Captures : [`docs/captures/`](docs/captures/).
 
 ## Sections à compléter
 
-- Exemple d'événement Event Grid et de message de file (membre 3)
 - Déploiement pas à pas (membres 2 et 4)
 - Captures du tableau de bord et des requêtes KQL sur les vraies données (membre 4, après déploiement)
 - Restrictions Azure for Students rencontrées et solutions (tous)

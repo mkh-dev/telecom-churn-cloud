@@ -1,0 +1,8 @@
+{
+  "fileName": "image.png",
+  "etag": "0x8DD0A1B2C3D4E60",
+  "reasonCode": "bad_extension",
+  "reason": "Extension .png refusée, attendu : .csv",
+  "rejectedAt": "2026-11-25T10:45:12Z",
+  "contentCopied": true
+}
