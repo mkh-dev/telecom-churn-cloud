@@ -54,7 +54,15 @@ def download_dataset() -> Path:
     if not DATA_FILE.exists():
         DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
         print(f"Téléchargement de {DATA_URL} ...")
-        urllib.request.urlretrieve(DATA_URL, DATA_FILE)
+        try:
+            urllib.request.urlretrieve(DATA_URL, DATA_FILE)
+        except OSError as exc:
+            DATA_FILE.unlink(missing_ok=True)
+            raise SystemExit(
+                f"Téléchargement impossible ({exc}).\n"
+                f"Téléchargez le fichier à la main depuis {DATA_URL}\n"
+                f"puis relancez : python train.py --data <chemin du fichier>"
+            ) from exc
     return DATA_FILE
 
 
@@ -153,7 +161,8 @@ def main() -> None:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     model_file = ARTIFACTS_DIR / f"model-{args.version}.joblib"
     joblib.dump(model, model_file, compress=3)
-    size_mb = model_file.stat().st_size / 1e6
+    size_bytes = model_file.stat().st_size
+    size_mb = size_bytes / 1e6
 
     report = {
         "dataset": "IBM Telco Customer Churn (IBM/telco-customer-churn-on-icp4d, Apache-2.0)",
@@ -168,17 +177,21 @@ def main() -> None:
         "latency_ms_batch": {"rows": len(batch), "ms": round(batch_ms, 1)},
         "model_size_mb": round(size_mb, 3),
     }
-    (ARTIFACTS_DIR / f"metrics-{args.version}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    (ARTIFACTS_DIR / f"metrics-{args.version}.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     # Fichier d'exemple pour la démo du pipeline (20 clients du jeu de test, sans la colonne Churn)
-    raw.loc[x_test.index[:20], INPUT_COLUMNS].to_csv(ARTIFACTS_DIR / "sample-clients.csv", index=False)
+    raw.loc[x_test.index[:20], INPUT_COLUMNS].to_csv(
+        ARTIFACTS_DIR / "sample-clients.csv", index=False, encoding="utf-8"
+    )
 
     # Copie pour l'image Docker de l'API (membre 2)
     API_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(model_file, API_MODELS_DIR / model_file.name)
 
     print(f"Latence : {batch_ms:.0f} ms pour {len(batch)} clients")
-    print(f"Modèle : {model_file} ({size_mb:.2f} Mo), copié dans {API_MODELS_DIR}")
+    print(f"Modèle : {model_file} ({size_bytes / 1024:.1f} Ko, limite 100 Mo), copié dans {API_MODELS_DIR}")
     print(f"Exemple de fichier pour la démo : {ARTIFACTS_DIR / 'sample-clients.csv'}")
 
 
