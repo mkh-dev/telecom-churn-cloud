@@ -63,6 +63,8 @@ Version retenue : `model-1.0.0.joblib`, environ 3 Ko (limite : 100 Mo), 16 ms po
 
 ## 2. Architecture et région (membre 2)
 
+Schéma détaillé, parcours d'un fichier et responsables de chaque composant : [`docs/architecture.md`](docs/architecture.md).
+
 ```mermaid
 flowchart LR
     U([Export CRM<br/>CSV clients]) -->|dépôt| IN[(Blob Storage<br/>input/)]
