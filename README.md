@@ -61,11 +61,204 @@ meilleure ROC-AUC (à égalité ou presque avec la Random Forest), plus légère
 
 Version retenue : `model-1.0.0.joblib`, environ 3 Ko (limite : 100 Mo), 16 ms pour prédire un lot de 1 000 clients sur CPU (limite : 1 s).
 
+## 2. Architecture et région (membre 2)
+
+Schéma détaillé, parcours d'un fichier et responsables de chaque composant : [`docs/architecture.md`](docs/architecture.md).
+
+```mermaid
+flowchart LR
+    U([Export CRM<br/>CSV clients]) -->|dépôt| IN[(Blob Storage<br/>input/)]
+    IN -->|BlobCreated| EG{{Event Grid}}
+    EG --> D[Function<br/>dispatcher]
+    D -->|message| Q[[Storage Queue<br/>inference-requests]]
+    Q --> W[Function<br/>worker]
+    W -->|POST /predict| API[API FastAPI<br/>Container Apps]
+    API -.->|image| GHCR[(GHCR)]
+    W --> OUT[(Blob Storage<br/>output/)]
+    W --> DB[(Cosmos DB<br/>pipeline/inferences)]
+    DB --> WEB[Tableau de bord]
+    API -.->|télémétrie| AI[Application Insights]
+    D -.-> AI
+    W -.-> AI
+```
+
+1. Un CSV de clients (1 à 1 000 lignes) est déposé dans le conteneur `input/` du compte de stockage.
+2. Event Grid publie l'événement `BlobCreated` ; la Function *dispatcher* valide le fichier et met un message
+   dans la file `inference-requests` (format : `docs/contrats.md`, section 3).
+3. La Function *worker* lit le CSV et l'envoie en un seul appel à `POST /predict` de l'API.
+4. Les prédictions par client vont dans `output/`, le résumé du fichier dans Cosmos DB, que lit le tableau de bord.
+5. L'API, les Functions et la CI remontent leur télémétrie dans Application Insights.
+
+La file découple la réception de l'inférence : si l'API redémarre (démarrage à froid avec `min-replicas 0`),
+les messages attendent et sont retraités au lieu d'être perdus.
+
+**Région : France Central (`francecentral`).** Justification :
+
+- **Autorisée par la souscription** : la stratégie Azure for Students « Allowed resource deployment regions »
+  n'accepte que `francecentral`, `germanywestcentral`, `italynorth`, `norwayeast` et `denmarkeast`.
+- **Tous les services du projet y sont disponibles** : Container Apps, Functions, Storage, Event Grid,
+  Cosmos DB et Application Insights (vérifié avec `az provider show`). `denmarkeast` n'a pas Container Apps.
+- **Latence la plus faible depuis Paris**, pour le dépôt des fichiers et la démonstration.
+- **Données dans l'Union européenne, en France** (RGPD) : les fichiers CRM contiennent des données de clients.
+- **Une seule région pour toutes les ressources** : pas de trafic sortant facturé entre régions et une
+  latence minimale entre le worker et l'API.
+
+## 3. API d'inférence (membre 2)
+
+API FastAPI dans `api/` (détails, contrat complet et configuration : [`api/README.md`](api/README.md)).
+Image Docker multi-étapes `python:3.12-slim`, utilisateur non root, environ 123 Mo compressée, publiée sur
+`ghcr.io/mkh-dev/telecom-churn-cloud/api` et déployée sur Azure Container Apps (0,25 vCPU, 0,5 Gi, 0 à 2 réplicas).
+
+| Endpoint | Rôle |
+|---|---|
+| `POST /predict` | Prédit le churn de 1 à 1 000 clients (422 si l'entrée est invalide) |
+| `GET /health` | État du modèle ; 503 s'il n'est pas chargé (sondes liveness et readiness) |
+| `GET /version` | Versions de l'API et du modèle |
+| `GET /metrics` | Appels, latence moyenne, clients scorés, erreurs |
+
+Exemple (en local : `URL=http://localhost:8000`) :
+
+```bash
+curl -s -X POST $URL/predict -H 'Content-Type: application/json' -d @api/dev/sample_request.json
+```
+
+```json
+{
+  "predictions": [
+    {"customerID": "7590-VHVEG", "churn_probability": 0.8021, "churn": true, "churn_prediction": 1, "risk_level": "élevé"},
+    {"customerID": "5575-GNVDE", "churn_probability": 0.119, "churn": false, "churn_prediction": 0, "risk_level": "faible"}
+  ],
+  "model_version": "1.0.0",
+  "latency_ms": 10.7
+}
+```
+
+Le modèle est choisi par la variable `MODEL_PATH` : `model-1.0.0.joblib` (régression logistique) par défaut,
+`model-2.0.0.joblib` (Random Forest) pour une seconde révision en A/B, sans changer le code. Latence mesurée
+pour 1 000 clients : 8 ms (1.0.0) et 35 ms (2.0.0).
+
+## 4. Pipeline événementiel (membre 3)
+
+Documentation complète : [`docs/pipeline.md`](docs/pipeline.md). Code : `functions/`. Scripts Azure : `infra/pipeline/`.
+
+Une seule Function App Flex Consumption (Python 3.12) contient trois fonctions :
+
+| Fonction | Déclencheur | Rôle |
+|---|---|---|
+| `dispatcher` | Event Grid `BlobCreated` filtré sur `input/` | Vérifie l'extension, la taille, l'UTF-8, les 20 colonnes, les types et les 1 000 lignes maximum. Pose un ticket dans `inference-requests`, ou copie le fichier dans `rejected/` avec le motif |
+| `worker` | File `inference-requests` | Appelle `POST /predict` (un appel par fichier, délai de 20 s, client HTTP réutilisé). Écrit `output/<nom>_<etag>.json` et fait un upsert dans Cosmos DB (idempotent) |
+| `recent` | HTTP `GET /api/recent` | Renvoie les 20 dernières inférences pour le tableau de bord (CORS limité au site) |
+
+En cas d'échec, `host.json` fixe `maxDequeueCount = 5` avec une visibilité de 10 s. Le message part ensuite dans `inference-requests-poison` ; le scénario « API coupée » est documenté dans `docs/pipeline.md` §5.
+
+Les connexions passent par l'identité managée, sans aucun secret.
+
+Exemple d'événement Event Grid (extrait de [`docs/exemples-pipeline/evenement_eventgrid.json`](docs/exemples-pipeline/evenement_eventgrid.json)) :
+
+```json
+{"subject": "/blobServices/default/containers/input/blobs/clients-2026-11-25.csv",
+ "eventType": "Microsoft.Storage.BlobCreated", "eventTime": "2026-11-25T10:42:07.1234567Z",
+ "data": {"api": "PutBlob", "eTag": "0x8DD0A1B2C3D4E5F", "contentLength": 4123,
+          "url": "https://st<equipe>pipe.blob.core.windows.net/input/clients-2026-11-25.csv"}}
+```
+
+Message de file correspondant :
+
+```json
+{"blobName": "input/clients-2026-11-25.csv", "etag": "0x8DD0A1B2C3D4E5F", "size": 4123, "rows": 20, "timestamp": "2026-11-25T10:42:07Z"}
+```
+
+Tester en local, sans Azure :
+
+```bash
+pip install -r model/requirements.txt && ruff check . && pytest functions/tests
+```
+
+## 5. Tableau de bord (membre 4)
+
+Page statique `web/` (HTML, CSS, JavaScript, [Chart.js 4.4.1](https://www.chartjs.org/)), sans framework ni build,
+hébergée dans le **site web statique** du compte de stockage (`$web`). Elle lit `GET /api/recent`
+(contrat : [`docs/contrats.md`](docs/contrats.md), section 5) toutes les 30 s.
+
+| Élément | Contenu |
+|---|---|
+| Indicateurs | fichiers traités (et en erreur), clients scorés, clients à risque élevé, taux de churn prédit (moyenne pondérée), durée moyenne de traitement, version du modèle |
+| Graphiques | taux de churn par fichier, répartition des niveaux de risque, clients par fichier (risque élevé / autres), durée de traitement comparée à l'objectif de 2 s |
+| Tableaux | derniers fichiers (documents Cosmos DB, statut `ok` / `error`) ; clients du dernier fichier triés par probabilité, filtrables par risque, recherche par `customerID`, export CSV |
+| Robustesse | mode démo sans API (`demo/recent.json`, données fictives) ; si l'API ne répond pas, bandeau d'erreur et données de démo ; thème clair/sombre ; affichage mobile |
+
+Lancer en local :
+
+```bash
+cd web
+python -m http.server 8080
+# http://localhost:8080/?demo=1                                  données fictives
+# http://localhost:8080/?api=https://<function-app>.azurewebsites.net   vraies données
+```
+
+En production, `deploy.yml` réécrit `web/config.js` avec la variable GitHub `API_BASE_URL`.
+
+## 6. Intégration et déploiement continus (membre 4)
+
+| Workflow | Déclencheur | Jobs |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | push sur `main`, toute pull request | **model** : ruff + pytest ; **api** : ruff + pytest + image Docker (publiée sur GHCR seulement sur `main`) ; **functions** : ruff + pytest ; **web** : syntaxe JS, conformité de `demo/recent.json` au contrat, validation HTML |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push sur `main` touchant `web/` ou `functions/`, ou manuel | **web** : envoi de `web/` dans `$web` ; **functions** : publication de la Function App |
+
+Un job dont le dossier n'est pas encore fusionné (`api/`, `functions/`) est ignoré avec un message, au lieu d'échouer.
+À activer dans *Settings > Branches* : protéger `main` (pull request obligatoire, CI verte).
+
+Configuration GitHub (*Settings > Secrets and variables > Actions*) :
+
+| Nom | Type | Valeur |
+|---|---|---|
+| `AZURE_STORAGE_CONNECTION_STRING` | secret | `az storage account show-connection-string -g <rg> -n <stockage> -o tsv` |
+| `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | secret | portail > Function App > *Télécharger le profil de publication* |
+| `API_BASE_URL` | variable | `https://<function-app>.azurewebsites.net` |
+| `FUNCTIONAPP_NAME` | variable | nom de la Function App |
+
+Azure for Students ne permet généralement pas de créer un principal de service : les déploiements utilisent
+donc des secrets limités à une ressource (chaîne de connexion du stockage, profil de publication) plutôt qu'une
+connexion OIDC à toute la souscription.
+
+## 7. Supervision et alertes (membre 4)
+
+[`infra/monitoring.sh`](infra/monitoring.sh) crée, en `francecentral` :
+
+- un espace **Log Analytics** (rétention 30 jours, **plafond 0,1 Go/jour** pour protéger le budget) et
+  **Application Insights** `appi-churn` basé sur cet espace ;
+- le branchement de la Function App (paramètre `APPLICATIONINSIGHTS_CONNECTION_STRING`) et de la Container App
+  (secret `appinsights-cs`, voir `api/deploy/containerapp.md`) ;
+- un groupe d'actions e-mail et 4 alertes :
+
+| Alerte | Condition | Sévérité |
+|---|---|---|
+| `alert-requetes-en-echec` | plus de 5 requêtes en échec en 5 min | 2 |
+| `alert-latence` | temps de réponse moyen > 2 000 ms sur 15 min (critère de succès < 2 s) | 3 |
+| `alert-exceptions-pipeline` | au moins une exception dans les Functions sur 10 min | 2 |
+| `alert-file-en-attente` | plus de 20 messages en attente dans la file sur 1 h | 3 |
+
+- le site web statique du tableau de bord et le **CORS** de la Function App pour son origine.
+
+```bash
+RG=<rg> STORAGE=<stockage> FUNC_APP=<function-app> CONTAINER_APP=<container-app> \
+ALERT_EMAIL=<adresse> bash infra/monitoring.sh
+```
+
+### Requêtes KQL
+
+Dans [`docs/kql/requetes.kql`](docs/kql/requetes.kql) (portail > Application Insights > *Journaux*) :
+
+1. **Temps de réponse de `/predict`** : p50, p95 et échecs par tranche de 15 min, comparés à l'objectif de 2 s.
+2. **A/B des modèles** : clients scorés et latence moyenne du modèle par `model_version` (métriques
+   OpenTelemetry `churn_customers_scored` et `churn_model_latency_ms` de l'API).
+3. **Santé du pipeline** : exécutions, échecs et exceptions par composant (dispatcher, worker, recent, API).
+
+Deux requêtes bonus : dernières exceptions, et trajet de bout en bout d'un fichier à partir de son nom.
+Captures : [`docs/captures/`](docs/captures/).
+
 ## Sections à compléter
 
-- Schéma d'architecture, région choisie et justification (membre 2)
-- API et exemple `curl` (membre 2)
-- Exemple d'événement Event Grid et de message de file (membre 3)
 - Déploiement pas à pas (membres 2 et 4)
-- 3 requêtes KQL avec captures (membre 4)
+- Captures du tableau de bord et des requêtes KQL sur les vraies données (membre 4, après déploiement)
 - Restrictions Azure for Students rencontrées et solutions (tous)

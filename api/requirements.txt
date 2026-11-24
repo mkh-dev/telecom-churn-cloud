@@ -1,0 +1,13 @@
+# Dépendances d'exécution de l'API (image Docker).
+# numpy, pandas, scikit-learn et joblib DOIVENT rester identiques à model/requirements.txt (membre 1) :
+# un joblib exporté avec une autre version de scikit-learn ne se charge pas (ou donne des résultats faux).
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.1
+scipy==1.18.1
+joblib==1.6.0
+
+fastapi==0.115.6
+pydantic==2.10.4
+uvicorn==0.34.0
+azure-monitor-opentelemetry==1.6.4

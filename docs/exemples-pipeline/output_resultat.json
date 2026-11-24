@@ -1,0 +1,61 @@
+{
+  "id": "clients-2026-11-25.csv_0x8DD0A1B2C3D4E5F",
+  "fileName": "clients-2026-11-25.csv",
+  "etag": "0x8DD0A1B2C3D4E5F",
+  "uploadedAt": "2026-11-25T10:42:07Z",
+  "timestamp": "2026-11-25T10:42:09Z",
+  "modelVersion": "1.0.0",
+  "summary": {
+    "nCustomers": 20,
+    "nHighRisk": 4,
+    "nMediumRisk": 4,
+    "nChurn": 8,
+    "churnRate": 0.4,
+    "avgProbability": 0.4031,
+    "topRisk": [
+      {
+        "customerID": "4706-AXVKM",
+        "churn_probability": 0.8536
+      },
+      {
+        "customerID": "2754-SDJRD",
+        "churn_probability": 0.8531
+      },
+      {
+        "customerID": "1379-FRVEB",
+        "churn_probability": 0.8204
+      },
+      {
+        "customerID": "4686-UXDML",
+        "churn_probability": 0.8061
+      },
+      {
+        "customerID": "2227-JRSJX",
+        "churn_probability": 0.6985
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "customerID": "4376-KFVRS",
+      "churn_prediction": 0,
+      "churn_probability": 0.1155,
+      "risk_level": "faible"
+    },
+    {
+      "customerID": "2754-SDJRD",
+      "churn_prediction": 1,
+      "churn_probability": 0.8531,
+      "risk_level": "élevé"
+    },
+    {
+      "customerID": "9917-KWRBE",
+      "churn_prediction": 0,
+      "churn_probability": 0.1468,
+      "risk_level": "faible"
+    },
+    {
+      "...": "17 autres clients"
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+# Déploiement continu (membre 4).
+# - web       : publie le tableau de bord dans le site web statique du compte de stockage ($web).
+# - functions : publie les Azure Functions du membre 3 (si le profil de publication est configuré).
+#
+# Azure for Students interdit souvent de créer un principal de service (az ad sp create-for-rbac) :
+# on utilise donc des secrets « par ressource » au lieu d'une connexion OIDC à la souscription.
+#
+# Secrets (Settings > Secrets and variables > Actions > Secrets) :
+#   AZURE_STORAGE_CONNECTION_STRING      compte de stockage qui héberge $web
+#   AZURE_FUNCTIONAPP_PUBLISH_PROFILE    profil de publication de la Function App (facultatif)
+# Variables (onglet Variables) :
+#   API_BASE_URL                         https://<function-app>.azurewebsites.net (sans / final)
+#   FUNCTIONAPP_NAME                     nom de la Function App (facultatif)
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "functions/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Tableau de bord -> Blob $web
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret présent ?
+        id: present
+        run: |
+          if [ -n "$AZURE_STORAGE_CONNECTION_STRING" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::Secret AZURE_STORAGE_CONNECTION_STRING absent : déploiement du tableau de bord ignoré"; fi
+
+      - name: Configuration de production (config.js)
+        if: steps.present.outputs.ok == 'true'
+        env:
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          cat > web/config.js <<EOF
+          // Généré par deploy.yml (commit ${GITHUB_SHA::7})
+          window.DASHBOARD_CONFIG = {
+            API_BASE_URL: "${API_BASE_URL%/}",
+            RECENT_LIMIT: 20,
+            REFRESH_SECONDS: 30,
+            LATENCY_SLO_MS: 2000,
+          };
+          EOF
+          cat web/config.js
+
+      - name: Envoi vers $web
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          az storage blob upload-batch \
+            --destination '$web' --source web --overwrite --only-show-errors \
+            --content-cache-control "no-cache"
+          echo "Publié. URL : portail Azure > compte de stockage > Site web statique > Point de terminaison principal" >> "$GITHUB_STEP_SUMMARY"
+
+  functions:
+    name: Azure Functions (membre 3)
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prêt à déployer ?
+        id: present
+        run: |
+          if [ -n "$PUBLISH_PROFILE" ] && [ -f functions/function_app.py ] && [ -n "${{ vars.FUNCTIONAPP_NAME }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Functions non déployées (code, secret AZURE_FUNCTIONAPP_PUBLISH_PROFILE ou variable FUNCTIONAPP_NAME manquant)"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.present.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances empaquetées avec le code
+        if: steps.present.outputs.ok == 'true'
+        working-directory: functions
+        run: pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+
+      - uses: Azure/functions-action@v1
+        if: steps.present.outputs.ok == 'true'
+        with:
+          app-name: ${{ vars.FUNCTIONAPP_NAME }}
+          package: functions
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          scm-do-build-during-deployment: false
+          enable-oryx-build: false

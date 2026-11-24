@@ -178,12 +178,12 @@ def main() -> None:
         "model_size_mb": round(size_mb, 3),
     }
     (ARTIFACTS_DIR / f"metrics-{args.version}.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
     )
 
     # Fichier d'exemple pour la démo du pipeline (20 clients du jeu de test, sans la colonne Churn)
     raw.loc[x_test.index[:20], INPUT_COLUMNS].to_csv(
-        ARTIFACTS_DIR / "sample-clients.csv", index=False, encoding="utf-8"
+        ARTIFACTS_DIR / "sample-clients.csv", index=False, encoding="utf-8", lineterminator="\n"
     )
 
     # Copie pour l'image Docker de l'API (membre 2)

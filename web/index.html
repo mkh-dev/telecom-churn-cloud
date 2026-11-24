@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Churn Télécom — Tableau de bord</title>
+  <meta name="description" content="Résultats du pipeline de prédiction d'attrition télécom sur Azure">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5fbf'/%3E%3Cpath d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M7 22l6-7 5 4 7-9" /></svg>
+      </span>
+      <div>
+        <h1>Attrition télécom</h1>
+        <p class="subtitle">Pipeline Azure · Blob → Event Grid → Queue → FastAPI → Cosmos DB</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span id="source" class="pill" title="Source des données">…</span>
+      <span id="updated" class="muted small"></span>
+      <label class="switch small" title="Rafraîchissement automatique">
+        <input type="checkbox" id="auto" checked> Auto
+      </label>
+      <button id="refresh" type="button" class="btn">Actualiser</button>
+      <button id="theme" type="button" class="btn ghost" aria-label="Changer de thème" title="Thème clair / sombre">◐</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <section class="kpis" aria-label="Indicateurs clés">
+      <article class="kpi"><h2>Fichiers traités</h2><p id="k-files">–</p><span id="k-files-sub" class="muted small"></span></article>
+      <article class="kpi"><h2>Clients scorés</h2><p id="k-customers">–</p><span id="k-customers-sub" class="muted small"></span></article>
+      <article class="kpi accent"><h2>Clients à risque élevé</h2><p id="k-high">–</p><span id="k-high-sub" class="muted small"></span></article>
+      <article class="kpi"><h2>Taux de churn prédit</h2><p id="k-churn">–</p><span class="muted small">moyenne pondérée</span></article>
+      <article class="kpi"><h2>Durée de traitement</h2><p id="k-duration">–</p><span id="k-duration-sub" class="muted small"></span></article>
+      <article class="kpi"><h2>Modèle</h2><p id="k-model">–</p><span id="k-model-sub" class="muted small"></span></article>
+    </section>
+
+    <section class="grid">
+      <article class="card wide">
+        <header><h2>Taux de churn prédit par fichier</h2><span class="muted small">ordre chronologique</span></header>
+        <div class="chart"><canvas id="c-churn" aria-label="Taux de churn par fichier" role="img"></canvas></div>
+      </article>
+      <article class="card">
+        <header><h2>Niveaux de risque</h2><span id="risk-scope" class="muted small"></span></header>
+        <div class="chart"><canvas id="c-risk" aria-label="Répartition des niveaux de risque" role="img"></canvas></div>
+      </article>
+      <article class="card wide">
+        <header><h2>Clients par fichier</h2><span class="muted small">risque élevé / autres</span></header>
+        <div class="chart"><canvas id="c-volume" aria-label="Clients par fichier" role="img"></canvas></div>
+      </article>
+      <article class="card">
+        <header><h2>Durée de traitement</h2><span id="slo-label" class="muted small"></span></header>
+        <div class="chart"><canvas id="c-duration" aria-label="Durée de traitement par fichier" role="img"></canvas></div>
+      </article>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Derniers fichiers traités</h2>
+        <span class="muted small">documents Cosmos DB <code>pipeline/inferences</code></span>
+      </header>
+      <div class="table-wrap">
+        <table id="t-files">
+          <thead><tr>
+            <th scope="col">Date</th><th scope="col">Fichier</th><th scope="col" class="num">Clients</th><th scope="col" class="num">Risque élevé</th>
+            <th scope="col" class="num">Churn</th><th scope="col">Modèle</th><th scope="col" class="num">Durée</th><th scope="col">Statut</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="clients-card">
+      <header>
+        <h2>Clients du dernier fichier</h2>
+        <span id="clients-file" class="muted small"></span>
+      </header>
+      <div class="filters">
+        <input id="search" type="search" placeholder="Rechercher un customerID" aria-label="Rechercher un client">
+        <div class="seg" role="group" aria-label="Filtrer par niveau de risque">
+          <button type="button" data-risk="" class="on">Tous</button>
+          <button type="button" data-risk="élevé">Élevé</button>
+          <button type="button" data-risk="moyen">Moyen</button>
+          <button type="button" data-risk="faible">Faible</button>
+        </div>
+        <button id="export" type="button" class="btn ghost small">Exporter CSV</button>
+      </div>
+      <div class="table-wrap tall">
+        <table id="t-clients">
+          <thead><tr><th scope="col">customerID</th><th scope="col">Probabilité de départ</th><th scope="col">Prédiction</th><th scope="col">Risque</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="clients-count" class="muted small"></p>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    Projet Telecom Churn Cloud · ECE Paris 2026-2027 · Données : <code>GET /api/recent</code> ·
+    <a href="?demo=1">mode démo</a>
+  </footer>
+</body>
+</html>
