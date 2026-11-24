@@ -1,56 +1,174 @@
-# Déploiement continu (membre 4).
-# - web       : publie le tableau de bord dans le site web statique du compte de stockage ($web).
-# - functions : publie les Azure Functions du membre 3 (si le profil de publication est configuré).
+# Déploiement continu (membre 4) — connexion à Azure par OIDC, SANS AUCUN SECRET.
 #
-# Azure for Students interdit souvent de créer un principal de service (az ad sp create-for-rbac) :
-# on utilise donc des secrets « par ressource » au lieu d'une connexion OIDC à la souscription.
+# GitHub obtient un jeton OIDC à courte durée de vie, échangé contre un jeton Azure pour l'identité
+# managée « id-github-<equipe> » (identifiants fédérés, créés par infra/github-oidc.sh).
+# Aucun mot de passe, aucune clé, aucune chaîne de connexion n'est stockée dans GitHub.
 #
-# Secrets (Settings > Secrets and variables > Actions > Secrets) :
-#   AZURE_STORAGE_CONNECTION_STRING      compte de stockage qui héberge $web
-#   AZURE_FUNCTIONAPP_PUBLISH_PROFILE    profil de publication de la Function App (facultatif)
-# Variables (onglet Variables) :
-#   API_BASE_URL                         https://<function-app>.azurewebsites.net (sans / final)
-#   FUNCTIONAPP_NAME                     nom de la Function App (facultatif)
+# Déclenchement : après chaque run VERT de « CI » sur main (l'image sha-<commit> est alors sur GHCR),
+# ou à la main (Actions > Deploy > Run workflow).
+#
+# Variables du dépôt (Settings > Secrets and variables > Actions > Variables) — ce ne sont pas des secrets :
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   identité managée (affichés par github-oidc.sh)
+#   AZURE_RG, API_APP, FUNC_APP, STORAGE_ACCOUNT             noms des ressources (infra/pipeline/env.sh)
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths: ["web/**", "functions/**", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-production
   cancel-in-progress: false
 
 permissions:
   contents: read
+  id-token: write      # nécessaire pour obtenir le jeton OIDC
+
+env:
+  # Commit déployé : celui testé par la CI (workflow_run) ou le commit courant (lancement manuel)
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
-  web:
-    name: Tableau de bord -> Blob $web
+  config:
+    name: Vérification de la configuration
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Variables obligatoires
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_RG: ${{ vars.AZURE_RG }}
+          API_APP: ${{ vars.API_APP }}
+          FUNC_APP: ${{ vars.FUNC_APP }}
+          STORAGE_ACCOUNT: ${{ vars.STORAGE_ACCOUNT }}
+        run: |
+          missing=0
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_RG API_APP FUNC_APP STORAGE_ACCOUNT; do
+            if [ -z "${!v}" ]; then echo "::error::Variable GitHub $v manquante (voir infra/github-oidc.sh)"; missing=1; fi
+          done
+          # Échec explicite : un déploiement qui « réussit » sans rien déployer est pire qu'un échec
+          exit $missing
+
+  api:
+    name: API -> Container Apps
+    needs: config
     runs-on: ubuntu-latest
     environment: production
-    env:
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
 
-      - name: Secret présent ?
-        id: present
+      - name: Connexion à Azure (OIDC, identité managée)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Nouvelle révision avec l'image du commit
+        id: deploy
         run: |
-          if [ -n "$AZURE_STORAGE_CONNECTION_STRING" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
-          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::warning::Secret AZURE_STORAGE_CONNECTION_STRING absent : déploiement du tableau de bord ignoré"; fi
+          SHORT="${SHA::7}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/api:sha-${SHORT}"
+          echo "Image : $IMAGE"
+          az containerapp update -g "${{ vars.AZURE_RG }}" -n "${{ vars.API_APP }}" \
+            --image "$IMAGE" --revision-suffix "sha-${SHORT}" -o none
+          FQDN=$(az containerapp show -g "${{ vars.AZURE_RG }}" -n "${{ vars.API_APP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "url=https://$FQDN" >> "$GITHUB_OUTPUT"
+
+      - name: Vérification par /version (le commit doit apparaître)
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          SHORT="${SHA::7}"
+          # min-replicas 0 : démarrage à froid possible, on réessaie pendant 3 minutes
+          for i in $(seq 1 36); do
+            BODY=$(curl -fsS --max-time 10 "$URL/version" || true)
+            if echo "$BODY" | grep -q "\"commit\":\"${SHORT}\""; then
+              echo "OK après $((i*5)) s : $BODY"
+              {
+                echo "### API déployée"
+                echo "- URL : $URL"
+                echo "- \`GET /version\` : \`$BODY\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "tentative $i : ${BODY:-pas de réponse}"; sleep 5
+          done
+          echo "::error::/version ne renvoie pas le commit $SHORT après 3 minutes"
+          exit 1
+
+  functions:
+    name: Functions -> Function App (Flex Consumption)
+    needs: config
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Connexion à Azure (OIDC, identité managée)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Déploiement du code (build distant des dépendances)
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ vars.FUNC_APP }}
+          package: functions
+          sku: flexconsumption
+          remote-build: true
+
+      - name: Vérification de /api/recent
+        run: |
+          HOST=$(az functionapp show -g "${{ vars.AZURE_RG }}" -n "${{ vars.FUNC_APP }}" --query defaultHostName -o tsv)
+          for i in $(seq 1 24); do
+            CODE=$(curl -s -o /tmp/recent.json -w "%{http_code}" --max-time 15 "https://$HOST/api/recent?limit=1" || true)
+            if [ "$CODE" = "200" ]; then
+              echo "OK : $(head -c 300 /tmp/recent.json)"
+              echo "### Functions déployées : https://$HOST/api/recent répond 200" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "tentative $i : HTTP $CODE"; sleep 5
+          done
+          echo "::error::/api/recent ne répond pas 200 après 2 minutes"
+          exit 1
+
+  web:
+    name: Tableau de bord -> Blob $web
+    needs: config
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Connexion à Azure (OIDC, identité managée)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Configuration de production (config.js)
-        if: steps.present.outputs.ok == 'true'
-        env:
-          API_BASE_URL: ${{ vars.API_BASE_URL }}
         run: |
+          HOST=$(az functionapp show -g "${{ vars.AZURE_RG }}" -n "${{ vars.FUNC_APP }}" --query defaultHostName -o tsv)
           cat > web/config.js <<EOF
-          // Généré par deploy.yml (commit ${GITHUB_SHA::7})
+          // Généré par deploy.yml (commit ${SHA::7})
           window.DASHBOARD_CONFIG = {
-            API_BASE_URL: "${API_BASE_URL%/}",
+            API_BASE_URL: "https://${HOST}",
             RECENT_LIMIT: 20,
             REFRESH_SECONDS: 30,
             LATENCY_SLO_MS: 2000,
@@ -58,48 +176,12 @@ jobs:
           EOF
           cat web/config.js
 
-      - name: Envoi vers $web
-        if: steps.present.outputs.ok == 'true'
+      - name: Envoi vers $web (rôle Storage Blob Data Contributor, pas de clé)
         run: |
-          az storage blob upload-batch \
+          az storage blob upload-batch --account-name "${{ vars.STORAGE_ACCOUNT }}" --auth-mode login \
             --destination '$web' --source web --overwrite --only-show-errors \
             --content-cache-control "no-cache"
-          echo "Publié. URL : portail Azure > compte de stockage > Site web statique > Point de terminaison principal" >> "$GITHUB_STEP_SUMMARY"
-
-  functions:
-    name: Azure Functions (membre 3)
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prêt à déployer ?
-        id: present
-        run: |
-          if [ -n "$PUBLISH_PROFILE" ] && [ -f functions/function_app.py ] && [ -n "${{ vars.FUNCTIONAPP_NAME }}" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Functions non déployées (code, secret AZURE_FUNCTIONAPP_PUBLISH_PROFILE ou variable FUNCTIONAPP_NAME manquant)"
-          fi
-
-      - uses: actions/setup-python@v5
-        if: steps.present.outputs.ok == 'true'
-        with:
-          python-version: "3.12"
-
-      - name: Dépendances empaquetées avec le code
-        if: steps.present.outputs.ok == 'true'
-        working-directory: functions
-        run: pip install -r requirements.txt --target=".python_packages/lib/site-packages"
-
-      - uses: Azure/functions-action@v1
-        if: steps.present.outputs.ok == 'true'
-        with:
-          app-name: ${{ vars.FUNCTIONAPP_NAME }}
-          package: functions
-          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          scm-do-build-during-deployment: false
-          enable-oryx-build: false
+          WEB=$(az storage account show -g "${{ vars.AZURE_RG }}" -n "${{ vars.STORAGE_ACCOUNT }}" \
+            --query primaryEndpoints.web -o tsv)
+          curl -fsS --max-time 15 "$WEB" | grep -q "Attrition télécom"
+          echo "### Tableau de bord publié : $WEB" >> "$GITHUB_STEP_SUMMARY"

@@ -128,7 +128,14 @@ def test_health_without_model(monkeypatch, customer, tmp_path):
 
 
 def test_version(client):
-    assert client.get("/version").json() == {"api_version": __version__, "model_version": "1.0.0"}
+    assert client.get("/version").json() == {"api_version": __version__, "model_version": "1.0.0", "commit": "dev"}
+
+
+def test_version_commit_from_env(monkeypatch):
+    # deploy.yml vérifie que /version renvoie le commit déployé (GIT_SHA est figé dans l'image par la CI)
+    monkeypatch.setenv("GIT_SHA", "abc1234")
+    with TestClient(app) as c:
+        assert c.get("/version").json()["commit"] == "abc1234"
 
 
 def test_model_version_from_env(monkeypatch):

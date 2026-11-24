@@ -23,6 +23,9 @@
   const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(2).replace(".", ",")} s` : `${Math.round(ms)} ms`);
   const shortName = (f) => String(f || "").replace(/\.csv$/i, "").replace(/^clients-/, "");
 
+  // Mêmes seuils que model/churn_model.py (contrat, section 2)
+  const riskLevel = (p) => (p >= 0.7 ? "élevé" : p >= 0.4 ? "moyen" : "faible");
+
   const state = { data: null, charts: {}, timer: null, risk: "", search: "" };
 
   // ---------- Thème ----------
@@ -51,13 +54,35 @@
         ...d,
         nCustomers: Number(d.nCustomers) || 0,
         nHighRisk: Number(d.nHighRisk) || 0,
+        nMediumRisk: d.nMediumRisk == null ? null : Number(d.nMediumRisk) || 0,
         churnRate: Number(d.churnRate) || 0,
         durationMs: Number(d.durationMs) || 0,
         status: d.status || "ok",
         ts: new Date(d.timestamp),
       }))
       .sort((a, b) => b.ts - a.ts);
-    const latest = !Array.isArray(raw) && raw.latest && Array.isArray(raw.latest.predictions) ? raw.latest : null;
+    let latest = !Array.isArray(raw) && raw.latest && Array.isArray(raw.latest.predictions) ? raw.latest : null;
+    if (!latest) {
+      // Format réel de la fonction recent (membre 3) : pas de détail complet, mais topRisk
+      // (clients les plus à risque) dans chaque document. On affiche ceux du dernier fichier traité.
+      const last = docs.find((d) => d.status === "ok" && Array.isArray(d.topRisk) && d.topRisk.length);
+      if (last) {
+        latest = {
+          fileName: last.fileName,
+          modelVersion: last.modelVersion,
+          partial: true,
+          predictions: last.topRisk.map((p) => {
+            const prob = Number(p.churn_probability) || 0;
+            return {
+              customerID: p.customerID,
+              churn_probability: prob,
+              churn_prediction: p.churn_prediction ?? (prob >= 0.5 ? 1 : 0),
+              risk_level: p.risk_level || riskLevel(prob),
+            };
+          }),
+        };
+      }
+    }
     return { docs, latest, demo: Boolean(raw.demo), generatedAt: raw.generatedAt };
   }
 
@@ -218,7 +243,7 @@
 
     // 2. Niveaux de risque (détail du dernier fichier, sinon agrégat Cosmos)
     let riskLabels, riskData, riskColors;
-    if (latest && latest.predictions.length) {
+    if (latest && !latest.partial && latest.predictions.length) {
       const counts = Object.fromEntries(RISKS.map((r) => [r, 0]));
       latest.predictions.forEach((p) => { if (p.risk_level in counts) counts[p.risk_level]++; });
       riskLabels = ["Élevé (≥ 70 %)", "Moyen (40-70 %)", "Faible (< 40 %)"];
@@ -228,9 +253,16 @@
     } else {
       const tot = chrono.reduce((s, d) => s + d.nCustomers, 0);
       const hi = chrono.reduce((s, d) => s + d.nHighRisk, 0);
-      riskLabels = ["Élevé", "Moyen + faible"];
-      riskData = [hi, tot - hi];
-      riskColors = [high, low];
+      if (chrono.length && chrono.every((d) => d.nMediumRisk != null)) {
+        const mid = chrono.reduce((s, d) => s + d.nMediumRisk, 0);
+        riskLabels = ["Élevé (≥ 70 %)", "Moyen (40-70 %)", "Faible (< 40 %)"];
+        riskData = [hi, mid, Math.max(tot - hi - mid, 0)];
+        riskColors = [high, medium, low];
+      } else {
+        riskLabels = ["Élevé", "Moyen + faible"];
+        riskData = [hi, tot - hi];
+        riskColors = [high, low];
+      }
       $("risk-scope").textContent = "tous les fichiers";
     }
     chart("c-risk", {
@@ -323,6 +355,7 @@
     const card = $("clients-card");
     card.hidden = !latest;
     if (!latest) return;
+    $("clients-title").textContent = latest.partial ? "Clients les plus à risque du dernier fichier" : "Clients du dernier fichier";
     $("clients-file").textContent = `${latest.fileName}${latest.modelVersion ? ` · modèle ${latest.modelVersion}` : ""}`;
     const colors = { "élevé": css("--high"), moyen: css("--medium"), faible: css("--low") };
     const rows = filteredClients();
