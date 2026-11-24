@@ -1,3 +1,6 @@
+# Réglages personnels de l'éditeur
+.vscode/
+
 # Python
 __pycache__/
 *.pyc
