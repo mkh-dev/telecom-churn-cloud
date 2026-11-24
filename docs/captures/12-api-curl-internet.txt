@@ -25,3 +25,8 @@ HTTP 200 en 0.360799 s
 
 $ curl -s $URL/metrics
 {"calls":4,"avg_latency_ms":48.73,"customers_scored":2010,"errors":4}
+
+# Après le déploiement de l'image sha-51d0839 (commit de main, 2026-11-24 10:54 UTC) :
+
+$ curl -s $URL/version
+{"api_version":"0.2.0","model_version":"1.0.0","commit":"51d0839"}
