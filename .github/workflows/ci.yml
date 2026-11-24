@@ -1,0 +1,175 @@
+# Intégration continue (membre 4, avec les étapes fournies par les membres 1, 2 et 3).
+# Chaque job vérifie d'abord que son dossier existe : la CI reste verte tant qu'une partie n'est pas fusionnée.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  model:
+    name: Modèle (membre 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: model/requirements.txt
+
+      - name: Dépendances
+        run: pip install -r model/requirements.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check model
+          ruff format --check model
+
+      - name: Tests (pytest)
+        run: pytest -q model/tests
+
+  api:
+    name: API + image Docker (membre 2)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # publication sur ghcr.io avec GITHUB_TOKEN
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dossier api/ présent ?
+        id: present
+        working-directory: .
+        run: |
+          if [ -f api/requirements-dev.txt ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::api/ absent sur cette branche : job ignoré"; fi
+
+      - uses: actions/setup-python@v5
+        if: steps.present.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: api/requirements*.txt
+
+      - name: Dépendances
+        if: steps.present.outputs.ok == 'true'
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Tests (pytest)
+        if: steps.present.outputs.ok == 'true'
+        run: pytest -q
+
+      - name: Version de l'API
+        if: steps.present.outputs.ok == 'true'
+        id: version
+        run: echo "version=$(python -c 'import app; print(app.__version__)')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.present.outputs.ok == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.present.outputs.ok == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        if: steps.present.outputs.ok == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/api
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha,prefix=sha-
+
+      - name: Construction (et publication sur main) de l'image
+        if: steps.present.outputs.ok == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: api
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  functions:
+    name: Functions (membre 3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dossier functions/ présent ?
+        id: present
+        run: |
+          if [ -f functions/function_app.py ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::functions/ vide sur cette branche : job ignoré"; fi
+
+      - uses: actions/setup-python@v5
+        if: steps.present.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances
+        if: steps.present.outputs.ok == 'true'
+        run: |
+          pip install ruff==0.8.4 pytest==8.3.4
+          if [ -f functions/requirements.txt ]; then pip install -r functions/requirements.txt; fi
+
+      - name: Lint (ruff)
+        if: steps.present.outputs.ok == 'true'
+        run: ruff check functions
+
+      - name: Tests (pytest, s'il y en a)
+        if: steps.present.outputs.ok == 'true' && hashFiles('functions/tests/**') != ''
+        run: pytest -q functions/tests
+
+  web:
+    name: Tableau de bord (membre 4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Syntaxe JavaScript
+        run: node --check web/app.js && node --check web/config.js
+
+      - name: Données de démo conformes au contrat /api/recent
+        run: |
+          node -e '
+            const d = require("./web/demo/recent.json");
+            const keys = ["id","day","fileName","timestamp","nCustomers","nHighRisk","churnRate","modelVersion","durationMs","status"];
+            if (!Array.isArray(d.items) || !d.items.length) throw new Error("items vide");
+            for (const it of d.items) for (const k of keys) if (!(k in it)) throw new Error(`${it.id} : champ ${k} manquant`);
+            for (const p of d.latest.predictions)
+              if (!["élevé","moyen","faible"].includes(p.risk_level)) throw new Error(`risk_level invalide : ${p.risk_level}`);
+            console.log(`${d.items.length} documents, ${d.latest.predictions.length} prédictions : OK`);
+          '
+
+      - name: Validation HTML
+        run: npx --yes html-validate@8.24.0 web/index.html

@@ -1,0 +1,63 @@
+// Requêtes KQL pour Application Insights (membre 4).
+// Portail Azure > appi-churn > Journaux. Coller UNE requête à la fois. Captures dans docs/captures/.
+
+// ---------------------------------------------------------------------------------------------
+// 1. Temps de réponse de l'API /predict (p50, p95) et objectif de 2 s, par tranche de 15 min
+// ---------------------------------------------------------------------------------------------
+requests
+| where timestamp > ago(24h)
+| where name has "/predict"
+| summarize appels = count(),
+            p50_ms = percentile(duration, 50),
+            p95_ms = percentile(duration, 95),
+            echecs = countif(success == false)
+    by bin(timestamp, 15m)
+| extend objectif_ms = 2000
+| order by timestamp asc
+| render timechart
+
+// ---------------------------------------------------------------------------------------------
+// 2. Clients scorés et latence du modèle par version (A/B 1.0.0 vs 2.0.0)
+//    Métriques OpenTelemetry de l'API : churn_customers_scored, churn_model_latency_ms
+// ---------------------------------------------------------------------------------------------
+customMetrics
+| where timestamp > ago(7d)
+| where name in ("churn_customers_scored", "churn_model_latency_ms")
+| extend model_version = tostring(customDimensions.model_version)
+| summarize total = sum(valueSum), n = sum(valueCount) by name, model_version
+| extend valeur = iff(name == "churn_model_latency_ms", round(total / n, 2), total)
+| project indicateur = iff(name == "churn_model_latency_ms", "latence moyenne du modèle (ms)", "clients scorés"),
+          model_version, valeur
+| order by indicateur, model_version
+
+// ---------------------------------------------------------------------------------------------
+// 3. Santé du pipeline : exécutions et échecs par composant (dispatcher, worker, recent, API)
+// ---------------------------------------------------------------------------------------------
+union requests, exceptions
+| where timestamp > ago(24h)
+| extend composant = strcat(cloud_RoleName, " : ", operation_Name)
+| summarize executions = countif(itemType == "request"),
+            echecs = countif(itemType == "request" and success == false),
+            exceptions = countif(itemType == "exception")
+    by composant
+| extend taux_echec = round(100.0 * echecs / iff(executions == 0, 1, executions), 1)
+| order by echecs desc, executions desc
+
+// ---------------------------------------------------------------------------------------------
+// 4. (bonus) Dernières exceptions avec leur message, pour le diagnostic
+// ---------------------------------------------------------------------------------------------
+exceptions
+| where timestamp > ago(24h)
+| project timestamp, cloud_RoleName, operation_Name, type, message = coalesce(outerMessage, innermostMessage)
+| order by timestamp desc
+| take 20
+
+// ---------------------------------------------------------------------------------------------
+// 5. (bonus) Trajet de bout en bout d'un fichier : toutes les traces qui citent son nom
+// ---------------------------------------------------------------------------------------------
+let fichier = "clients-2026-11-25.csv";
+union traces, requests, exceptions, dependencies
+| where timestamp > ago(2d)
+| where * has fichier
+| project timestamp, itemType, cloud_RoleName, operation_Name, name, message, duration, success
+| order by timestamp asc
