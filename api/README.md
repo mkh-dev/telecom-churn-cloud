@@ -4,7 +4,7 @@ API FastAPI qui charge le Pipeline scikit-learn du membre 1 (`models/model-<vers
 le risque de désabonnement d'un lot de clients télécom. Elle est appelée par le worker du membre 3.
 
 > [!IMPORTANT]
-> **scikit-learn est figé en `1.5.2`** (avec `numpy 2.1.3`, `pandas 2.2.3`, `joblib 1.4.2`), exactement comme
+> **scikit-learn est figé en `1.9.1`** (avec `numpy 2.5.3`, `pandas 3.0.5`, `joblib 1.6.0`), exactement comme
 > `model/requirements.txt`. Un joblib exporté avec une autre version ne se charge pas, ou donne des
 > résultats faux. Toute montée de version se fait **dans les deux fichiers en même temps** ; le test
 > `test_ml_versions_match_model_requirements` échoue sinon.
@@ -19,7 +19,7 @@ api/
 │   ├── model_loader.py   # joblib -> DataFrame -> predict_proba
 │   ├── settings.py       # variables d'environnement
 │   └── telemetry.py      # Azure Monitor (optionnel) + métriques personnalisées
-├── models/               # model-0.1.0.joblib (provisoire) ; model/train.py y copie model-1.0.0.joblib
+├── models/               # model-1.0.0 (LogReg, défaut), model-2.0.0 (Random Forest, A/B), model-0.1.0 (provisoire)
 ├── dev/                  # train_placeholder.py, sample_request.json (5 vrais clients)
 ├── tests/                # pytest
 ├── deploy/               # paramètres pour Container Apps (membre 3) et la CI (membre 4)
@@ -38,7 +38,8 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-Le modèle provisoire `models/model-0.1.0.joblib` est versionné. Pour le régénérer :
+Les modèles `model-1.0.0.joblib` et `model-2.0.0.joblib` sont copiés dans `models/` par `model/train.py` (membre 1).
+Le modèle provisoire `model-0.1.0.joblib` reste disponible pour tester sans eux ; pour le régénérer :
 `python dev/train_placeholder.py` (télécharge le CSV IBM si `model/data/` est vide).
 
 Tests et lint (comme la CI) :
@@ -65,22 +66,24 @@ L'image cible Azure Container Apps (`linux/amd64`). Depuis un Mac (Apple Silicon
 
 ```bash
 cd api
-docker buildx build --platform linux/amd64 -t telecom-churn-api:0.1.0 --load .
-docker run --rm -p 8000:8000 telecom-churn-api:0.1.0
-docker image ls telecom-churn-api:0.1.0
+docker buildx build --platform linux/amd64 -t telecom-churn-api:0.2.0 --load .
+docker run --rm -p 8000:8000 telecom-churn-api:0.2.0
+docker run --rm -p 8001:8000 -e MODEL_PATH=/app/models/model-2.0.0.joblib telecom-churn-api:0.2.0   # modèle B
+docker image ls telecom-churn-api:0.2.0
 ```
 
 - Multi-étapes : venv construit dans une première étape, copié dans une image `python:3.12-slim` propre.
 - Utilisateur non root (uid 10001), port 8000, `HEALTHCHECK` sur `/health` en Python standard (pas de curl).
-- Taille mesurée : environ 130 Mo compressée, 385 Mo décompressée (limite : 500 Mo).
-- Le modèle utilisé est choisi par `MODEL_PATH` (par défaut `/app/models/model-0.1.0.joblib`,
-  modifiable au build avec `--build-arg MODEL_FILE=model-1.0.0.joblib`).
+- Taille mesurée : environ 123 Mo compressée, 355 Mo décompressée (limite : 500 Mo).
+- Le modèle utilisé est choisi par `MODEL_PATH` (par défaut `/app/models/model-1.0.0.joblib`,
+  modifiable au build avec `--build-arg MODEL_FILE=model-2.0.0.joblib` ou au lancement avec `-e MODEL_PATH=...`).
+- Latence mesurée pour 1 000 clients : 8 ms (1.0.0) et 35 ms (2.0.0, Random Forest).
 
 ## Configuration (variables d'environnement uniquement)
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `MODEL_PATH` | `models/model-0.1.0.joblib` | Fichier joblib chargé une fois au démarrage |
+| `MODEL_PATH` | `models/model-1.0.0.joblib` | Fichier joblib chargé une fois au démarrage |
 | `MODEL_VERSION` | déduite du nom (`model-1.0.0.joblib` → `1.0.0`) | Version renvoyée par `/predict` et `/version` |
 | `RISK_THRESHOLD` | `0.5` | Seuil de `churn` / `churn_prediction` (entre 0 et 1) |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | absente | Active Azure Monitor ; sans elle l'API tourne sans Azure |
@@ -124,9 +127,9 @@ Réponse 200 :
 ```json
 {
   "predictions": [
-    {"customerID": "7590-VHVEG", "churn_probability": 0.817, "churn": true, "churn_prediction": 1, "risk_level": "élevé"}
+    {"customerID": "7590-VHVEG", "churn_probability": 0.8021, "churn": true, "churn_prediction": 1, "risk_level": "élevé"}
   ],
-  "model_version": "0.1.0",
+  "model_version": "1.0.0",
   "latency_ms": 10.7
 }
 ```
@@ -146,7 +149,7 @@ readiness bloque alors le trafic).
 
 ### `GET /version`
 
-`{"api_version": "0.1.0", "model_version": "0.1.0"}`
+`{"api_version": "0.2.0", "model_version": "1.0.0"}`
 
 ### `GET /metrics`
 

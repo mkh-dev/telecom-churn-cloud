@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "model-0.1.0.joblib"
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "model-1.0.0.joblib"
 
 
 def version_from_path(path: Path) -> str:

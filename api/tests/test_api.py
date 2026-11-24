@@ -24,7 +24,7 @@ def test_predict_success(client, sample_customers):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"predictions", "model_version", "latency_ms"}
-    assert body["model_version"] == "0.1.0"
+    assert body["model_version"] == "1.0.0"
     assert body["latency_ms"] >= 0
     assert [p["customerID"] for p in body["predictions"]] == [c["customerID"] for c in sample_customers]
     for p in body["predictions"]:
@@ -128,14 +128,24 @@ def test_health_without_model(monkeypatch, customer, tmp_path):
 
 
 def test_version(client):
-    assert client.get("/version").json() == {"api_version": __version__, "model_version": "0.1.0"}
+    assert client.get("/version").json() == {"api_version": __version__, "model_version": "1.0.0"}
 
 
 def test_model_version_from_env(monkeypatch):
-    # Bonus A/B : une 2e révision ne change que MODEL_PATH / MODEL_VERSION
-    monkeypatch.setenv("MODEL_VERSION", "0.1.0-b")
+    monkeypatch.setenv("MODEL_VERSION", "1.0.0-b")
     with TestClient(app) as c:
-        assert c.get("/version").json()["model_version"] == "0.1.0-b"
+        assert c.get("/version").json()["model_version"] == "1.0.0-b"
+
+
+@pytest.mark.parametrize("model_file", sorted(p.name for p in (API_DIR / "models").glob("model-*.joblib")))
+def test_every_shipped_model_loads(monkeypatch, sample_customers, model_file):
+    # Bonus A/B : une 2e révision ne change que MODEL_PATH, la version est déduite du nom du fichier
+    monkeypatch.setenv("MODEL_PATH", str(API_DIR / "models" / model_file))
+    with TestClient(app) as c:
+        assert c.get("/health").status_code == 200
+        r = c.post("/predict", json={"customers": sample_customers})
+    assert r.status_code == 200
+    assert r.json()["model_version"] == model_file.removeprefix("model-").removesuffix(".joblib")
 
 
 def test_metrics_increment(client, sample_customers, customer):
