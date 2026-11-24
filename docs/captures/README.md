@@ -15,3 +15,5 @@ Format PNG, nom `NN-sujet.png`. Masquer clés, chaînes de connexion, adresses e
 | `09-kql-3-codes-http.png` | Requête KQL 3 : répartition des codes HTTP et des erreurs | après déploiement |
 | `10-alertes.png` | Alerte `alert-fichier-rejete` déclenchée (`infra/declencher-alerte.sh`) + e-mail reçu | après déploiement |
 | `11-github-actions.png` | Runs verts de `CI` et `Deploy` (résumé avec `/version` et le commit) | après la première fusion |
+| `12-api-curl-internet.txt` | API appelée depuis Internet : les 4 endpoints, erreurs 422, lot de 1 000 clients (membre 2) | fait |
+| `13-api-0-replica.png` + `.txt` | API à 0 réplica au repos (portail + `az containerapp replica list`) (membre 2) | fait |

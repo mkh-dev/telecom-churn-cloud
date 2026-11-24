@@ -66,10 +66,11 @@ L'image cible Azure Container Apps (`linux/amd64`). Depuis un Mac (Apple Silicon
 
 ```bash
 cd api
-docker buildx build --platform linux/amd64 -t telecom-churn-api:0.2.0 --load .
-docker run --rm -p 8000:8000 telecom-churn-api:0.2.0
-docker run --rm -p 8001:8000 -e MODEL_PATH=/app/models/model-2.0.0.joblib telecom-churn-api:0.2.0   # modèle B
-docker image ls telecom-churn-api:0.2.0
+docker buildx build --platform linux/amd64 -t telecom-churn-api:0.3.0 \
+  --build-arg GIT_SHA=$(git rev-parse --short HEAD) --load .
+docker run --rm -p 8000:8000 telecom-churn-api:0.3.0
+docker run --rm -p 8001:8000 -e MODEL_PATH=/app/models/model-2.0.0.joblib telecom-churn-api:0.3.0   # modèle B
+docker image ls telecom-churn-api:0.3.0
 ```
 
 - Multi-étapes : venv construit dans une première étape, copié dans une image `python:3.12-slim` propre.
@@ -86,6 +87,7 @@ docker image ls telecom-churn-api:0.2.0
 | `MODEL_PATH` | `models/model-1.0.0.joblib` | Fichier joblib chargé une fois au démarrage |
 | `MODEL_VERSION` | déduite du nom (`model-1.0.0.joblib` → `1.0.0`) | Version renvoyée par `/predict` et `/version` |
 | `RISK_THRESHOLD` | `0.5` | Seuil de `churn` / `churn_prediction` (entre 0 et 1) |
+| `GIT_SHA` | `dev` (fixé au build de l'image) | Commit renvoyé par `/version` |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | absente | Active Azure Monitor ; sans elle l'API tourne sans Azure |
 
 Aucun secret n'est dans le code ni dans l'image : la chaîne de connexion est fournie par Container Apps
@@ -149,7 +151,8 @@ readiness bloque alors le trafic).
 
 ### `GET /version`
 
-`{"api_version": "0.2.0", "model_version": "1.0.0"}`
+`{"api_version": "0.3.0", "model_version": "1.0.0", "commit": "3f2c1e9"}` : `commit` est le SHA court du commit,
+inscrit dans l'image par la CI (`--build-arg GIT_SHA=<sha court>`) ; `dev` pour un build local sans cet argument.
 
 ### `GET /metrics`
 
