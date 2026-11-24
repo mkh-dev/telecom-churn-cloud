@@ -109,6 +109,7 @@ jobs:
         with:
           context: api
           platforms: linux/amd64
+          build-args: GIT_SHA=${{ github.sha }}   # renvoyé par GET /version (membre 2)
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

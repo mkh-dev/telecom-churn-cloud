@@ -72,6 +72,7 @@ class Health(BaseModel):
 class Version(BaseModel):
     api_version: str
     model_version: str
+    git_sha: str
 
 
 class Metrics(BaseModel):

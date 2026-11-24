@@ -132,7 +132,8 @@ def health(request: Request):
 
 @app.get("/version", response_model=Version)
 def version(request: Request) -> Version:
-    return Version(api_version=__version__, model_version=request.app.state.settings.model_version)
+    settings = request.app.state.settings
+    return Version(api_version=__version__, model_version=settings.model_version, git_sha=settings.git_sha)
 
 
 @app.get("/metrics", response_model=Metrics)

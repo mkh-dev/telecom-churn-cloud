@@ -22,7 +22,7 @@ def customer(sample_customers) -> dict:
 
 @pytest.fixture
 def client(monkeypatch):
-    for var in ("MODEL_PATH", "MODEL_VERSION", "RISK_THRESHOLD", "APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    for var in ("MODEL_PATH", "MODEL_VERSION", "RISK_THRESHOLD", "APPLICATIONINSIGHTS_CONNECTION_STRING", "GIT_SHA"):
         monkeypatch.delenv(var, raising=False)
     with TestClient(app) as c:
         yield c
