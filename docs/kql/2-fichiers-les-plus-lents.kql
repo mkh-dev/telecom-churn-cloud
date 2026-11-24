@@ -1,0 +1,18 @@
+// Application Insights > Journaux (période : 24 heures ou 7 jours). Sources : voir README.md de ce dossier.
+// =============================================================================================
+// 2. Les 5 fichiers les plus lents
+//    durationMs = traitement complet par le worker (lecture du CSV, appel API, écriture output/ + Cosmos)
+// =============================================================================================
+traces
+| where timestamp > ago(7d)
+| where message startswith "INFERENCE_DONE "
+| extend d = parse_json(substring(message, strlen("INFERENCE_DONE ")))
+| project timestamp,
+          fichier = tostring(d.fileName),
+          duree_totale_ms = todouble(d.durationMs),
+          latence_api_ms = todouble(d.apiLatencyMs),
+          latence_modele_ms = todouble(d.modelLatencyMs),
+          clients = toint(d.nCustomers),
+          modele = tostring(d.modelVersion),
+          tentative = toint(d.attempt)
+| top 5 by duree_totale_ms desc

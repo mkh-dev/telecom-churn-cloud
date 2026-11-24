@@ -1,0 +1,15 @@
+// Application Insights > Journaux (période : 24 heures ou 7 jours). Sources : voir README.md de ce dossier.
+// =============================================================================================
+// 3. Répartition des codes HTTP et des erreurs
+//    3a. Codes HTTP par composant (API FastAPI, fonction recent…)
+// =============================================================================================
+requests
+| where timestamp > ago(24h)
+| extend composant = iff(cloud_RoleName == "", "inconnu", cloud_RoleName),
+         famille = strcat(substring(resultCode, 0, 1), "xx")
+| summarize requetes = count() by composant, resultCode, famille
+| extend part = round(100.0 * requetes / toscalar(requests | where timestamp > ago(24h) | count), 1)
+| order by requetes desc
+
+// Variante graphique pour la capture :
+// requests | where timestamp > ago(24h) | summarize count() by resultCode | render piechart

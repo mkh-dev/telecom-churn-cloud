@@ -1,18 +1,125 @@
-# Vidéo de démonstration (≈ 5 min) — script (membre 4)
+# Vidéo de démonstration (5 min maximum) — membre 4
 
-Enregistrement : OBS Studio ou l'outil Capture de Windows (Win + Alt + R), 1080p, micro activé.
-Avant de commencer : pipeline déployé, tableau de bord ouvert, onglets du portail prêts, CSV de démo sur le bureau
-(`model/artifacts/sample-clients.csv` renommé `clients-demo.csv`, et `clients-invalide.csv` sans colonne `tenure`).
+Texte prêt à lire (environ 680 mots, soit 4 min 40 à un débit normal) et ce qu'il faut montrer à l'écran.
+Les passages entre crochets sont des actions, pas du texte à lire.
 
-| Temps | Écran | À dire / à faire |
-|---|---|---|
-| 0:00-0:30 | Schéma d'architecture (README, section 2) | Problème : repérer les clients télécom qui vont résilier. Chaîne Blob → Event Grid → Function → Queue → FastAPI → Blob + Cosmos DB → tableau de bord, en `francecentral`. |
-| 0:30-1:15 | Résultats du modèle (README, section 1) | Jeu IBM Telco, 2 modèles comparés à une référence naïve ; v1 régression logistique, ROC-AUC 0,841, rappel 78 %. Pourquoi l'accuracy seule est trompeuse. |
-| 1:15-2:30 | Portail : conteneur `input/` | **Déposer `clients-demo.csv`.** Montrer le message dans la file `inference-requests`, puis le fichier dans `output/` et le document dans Cosmos DB (Explorateur de données). |
-| 2:30-3:30 | Tableau de bord | Actualiser : le nouveau fichier apparaît en haut. Commenter les indicateurs, le graphique de risques, filtrer « Élevé », rechercher un client, export CSV. Durée de traitement sous l'objectif de 2 s. |
-| 3:30-4:00 | Portail : `input/` puis `rejected/` | **Déposer `clients-invalide.csv`** : il part dans `rejected/`, pas d'appel à l'API. |
-| 4:00-4:40 | Application Insights | Carte d'application, requêtes KQL 1 (inférences par heure), 2 (5 fichiers les plus lents) et 3 (codes HTTP) ; l'alerte `alert-fichier-rejete` déclenchée par le dépôt invalide et l'e-mail reçu. |
-| 4:40-5:00 | GitHub Actions | Un run vert de `CI` (4 jobs) et de `Deploy` (connexion OIDC sans secret, `/version` renvoie le commit). Conclusion : coût (rapport de coûts), limites, pistes (A/B v2). |
+## 1. Préparer (30 min avant)
 
-Conseils : couper les temps d'attente du pipeline au montage ; zoomer le navigateur à 125 % ; ne jamais montrer
-de clé, chaîne de connexion ou adresse e-mail à l'écran.
+**Outils**, sans rien installer : *Outil Capture d'écran* de Windows 11 (`Win + Maj + R`, mode vidéo) pour
+enregistrer, puis **Clipchamp** (fourni avec Windows) pour couper les temps d'attente et exporter en MP4 1080p.
+OBS Studio convient aussi.
+
+**Réchauffer le système**, sinon l'API démarre à froid (9 à 12 s quand elle sort de 0 réplica) :
+
+```bash
+source infra/pipeline/env.sh
+curl -s https://<api>/health                 # réveille l'API
+bash infra/pipeline/03_demo.sh valide        # 2 ou 3 fois : remplit le tableau de bord et les KQL
+bash infra/declencher-alerte.sh              # au moins 15 min avant : l'alerte et l'e-mail seront prêts
+```
+
+**Onglets ouverts dans cet ordre**, zoom du navigateur à 125 % :
+
+1. README sur GitHub, section 2 (schéma d'architecture) ;
+2. README, section 1 (tableau des résultats du modèle) ;
+3. portail Azure > compte de stockage `stchurnpipe` > *Conteneurs* ;
+4. le tableau de bord en ligne (URL dans `docs/captures/preuves/dashboard-url.txt`) ;
+5. Application Insights `appi-churn` > *Journaux*, avec les 3 requêtes de `docs/kql/` dans 3 onglets de requête ;
+6. Azure Monitor > *Alertes*, et la boîte mail avec l'e-mail d'alerte ;
+7. GitHub > *Actions*, le dernier run vert de `Deploy`.
+
+**Fichiers sur le bureau** : `functions/samples/clients_valide.csv` renommé `clients-demo.csv`, et
+`functions/samples/clients_colonnes_manquantes.csv` renommé `clients-invalide.csv`.
+
+**À ne jamais montrer** : clés, chaînes de connexion, identifiants de souscription, adresse e-mail (masquer
+l'en-tête de l'e-mail ou flouter au montage).
+
+## 2. Texte et écrans
+
+### 0:00 – 0:35 · Le problème et l'architecture — *onglet 1*
+
+> Bonjour. Notre projet prédit l'attrition des clients d'un opérateur télécom, c'est-à-dire les clients qui
+> risquent de résilier, et il le fait dans un pipeline entièrement automatique sur Microsoft Azure.
+> Un fichier CSV de clients est déposé dans Blob Storage. Event Grid prévient une Azure Function, le dispatcher,
+> qui valide le fichier et dépose un message dans une file d'attente. Une deuxième fonction, le worker, envoie
+> les clients à notre API de machine learning, une API FastAPI dans un conteneur Docker sur Container Apps.
+> Les résultats sont enregistrés dans Blob Storage et dans Cosmos DB, puis affichés dans un tableau de bord.
+> Tout est en France Central.
+
+### 0:35 – 1:15 · Le modèle — *onglet 2*
+
+> Le modèle est entraîné sur le jeu IBM Telco Customer Churn : environ 7 000 clients, dont 26,5 % sont partis.
+> Nous avons comparé une régression logistique et une forêt aléatoire à une référence naïve qui prédit toujours
+> « le client reste ». Cette référence atteint 73 % d'exactitude sans détecter un seul départ : c'est pour ça
+> que nous regardons surtout la ROC-AUC et le rappel. La régression logistique obtient une ROC-AUC de 0,84 et
+> repère 78 % des clients qui partent. Nous l'avons retenue : elle est aussi bonne, plus légère et explicable.
+
+### 1:15 – 2:25 · Un dépôt de bout en bout — *onglet 3, puis 4*
+
+> Je dépose maintenant un fichier de vingt clients dans le conteneur input.
+
+[Téléverser `clients-demo.csv` dans `input/`. Couper l'attente au montage.]
+
+> Quelques secondes plus tard, le résultat apparaît dans le conteneur output : une prédiction par client.
+> Le résumé du fichier est aussi enregistré dans Cosmos DB.
+
+[Ouvrir `output/`, montrer le fichier JSON. Passer à l'onglet 4, cliquer sur « Actualiser ».]
+
+> Le tableau de bord interroge la fonction recent toutes les trente secondes. Notre fichier est en haut de
+> la liste. On voit le nombre de clients scorés, les clients à risque élevé, le taux de churn prédit et la durée
+> de traitement, bien en dessous de notre objectif de deux secondes. Ici, la répartition entre risque élevé,
+> moyen et faible. Et en bas, les clients les plus à risque du dernier fichier, que le service client peut
+> appeler en priorité.
+
+[Survoler le graphique des risques, puis le tableau des clients.]
+
+### 2:25 – 3:00 · La robustesse — *onglet 3*
+
+> Que se passe-t-il avec un mauvais fichier ? Je dépose un CSV auquel il manque des colonnes.
+
+[Téléverser `clients-invalide.csv` dans `input/`, puis ouvrir `rejected/`.]
+
+> Le dispatcher le refuse avant tout appel à l'API : il est déplacé dans rejected, avec un fichier qui explique
+> le motif. Si l'API était en panne, le message serait retenté cinq fois puis placé dans une file poison :
+> aucun fichier n'est perdu.
+
+### 3:00 – 4:05 · La supervision — *onglets 5 et 6*
+
+> Toutes les briques envoient leur télémétrie dans Application Insights, avec OpenTelemetry et deux métriques
+> personnalisées : le nombre d'inférences et la latence du modèle.
+> Première requête KQL : le nombre d'inférences par heure.
+
+[Exécuter `1-inferences-par-heure.kql`.]
+
+> Deuxième requête : les cinq fichiers les plus lents, avec le temps passé dans l'API et dans le modèle.
+
+[Exécuter `2-fichiers-les-plus-lents.kql`.]
+
+> Troisième requête : la répartition des codes HTTP de l'API et des fonctions.
+
+[Exécuter `3-codes-http.kql`. Passer à l'onglet 6.]
+
+> Nous avons aussi des alertes. Celle-ci s'est déclenchée quand nous avons déposé un fichier invalide : l'équipe
+> reçoit un e-mail. D'autres alertes surveillent les échecs du worker, les erreurs serveur et un temps de réponse
+> supérieur à deux secondes.
+
+### 4:05 – 4:45 · Le déploiement continu — *onglet 7*
+
+> Enfin, l'automatisation. À chaque pull request, la CI vérifie le code avec Ruff, lance les tests et construit
+> l'image Docker. Quand une modification arrive sur main, le workflow Deploy se connecte à Azure par OIDC, sans
+> aucun mot de passe ni clé stockés dans GitHub, grâce à une identité managée. Il met à jour l'API, les fonctions
+> et le tableau de bord, puis vérifie que la route version renvoie bien le commit qui vient d'être déployé.
+
+[Ouvrir le résumé du run : la ligne `GET /version` avec le commit.]
+
+### 4:45 – 5:00 · Conclusion
+
+> Pour le coût, l'API descend à zéro réplica au repos et Cosmos DB est en offre gratuite, avec un budget et des
+> alertes à 23 euros par mois. Merci pour votre attention.
+
+## 3. Montage et rendu
+
+- Couper chaque attente de plus de 3 s, sans accélérer la voix ; durée finale **inférieure à 5 min**.
+- Exporter en MP4 1080p. Déposer la vidéo sur YouTube en « non répertoriée » ou sur le OneDrive de l'école, et
+  mettre le lien dans le README (le fichier vidéo ne va pas dans le dépôt).
+- Revoir la vidéo en entier pour vérifier qu'aucune donnée personnelle ou secrète n'apparaît.

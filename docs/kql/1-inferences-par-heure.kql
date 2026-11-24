@@ -1,0 +1,13 @@
+// Application Insights > Journaux (période : 24 heures ou 7 jours). Sources : voir README.md de ce dossier.
+// =============================================================================================
+// 1. Nombre d'inférences par heure
+//    pipeline.inferences = 1 par fichier traité ; pipeline.customers_scored = clients évalués
+// =============================================================================================
+customMetrics
+| where timestamp > ago(24h)
+| where name in ("pipeline.inferences", "pipeline.customers_scored")
+| summarize fichiers_traites = sumif(valueSum, name == "pipeline.inferences"),
+            clients_scores = sumif(valueSum, name == "pipeline.customers_scored")
+    by heure = bin(timestamp, 1h)
+| order by heure asc
+| render columnchart with (title = "Inférences par heure")
