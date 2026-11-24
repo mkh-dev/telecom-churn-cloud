@@ -65,9 +65,7 @@ def load(path: Path | None) -> pd.DataFrame:
 
 def build_pipeline() -> Pipeline:
     numeric = Pipeline([("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())])
-    prep = ColumnTransformer(
-        [("num", numeric, NUMERIC), ("cat", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL)]
-    )
+    prep = ColumnTransformer([("num", numeric, NUMERIC), ("cat", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL)])
     clf = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=SEED)
     return Pipeline([("prep", prep), ("clf", clf)])
 
