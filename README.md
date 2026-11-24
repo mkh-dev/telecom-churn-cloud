@@ -197,6 +197,8 @@ hébergée dans le **site web statique** du compte de stockage (`$web`). Elle li
 | Tableaux | derniers fichiers (documents Cosmos DB, statut `ok` / `error`) ; clients du dernier fichier triés par probabilité, filtrables par risque, recherche par `customerID`, export CSV |
 | Robustesse | mode démo sans API (`demo/recent.json`, données fictives) ; si l'API ne répond pas, bandeau d'erreur et données de démo ; thème clair/sombre ; affichage mobile |
 
+![Tableau de bord en mode démo](docs/captures/01-dashboard-demo.png)
+
 Lancer en local :
 
 ```bash
@@ -266,7 +268,8 @@ et envoie l'e-mail. Le script attend l'alerte dans Azure Monitor et affiche son 
 
 ### Requêtes KQL
 
-Dans [`docs/kql/requetes.kql`](docs/kql/requetes.kql) (portail > Application Insights > *Journaux*) :
+Dans [`docs/kql/`](docs/kql/), une requête par fichier (portail > Application Insights > *Journaux*, ou
+`bash infra/preuves.sh` qui enregistre les résultats) :
 
 1. **Nombre d'inférences par heure** : `customMetrics` `pipeline.inferences` (fichiers) et
    `pipeline.customers_scored` (clients), regroupés par heure.

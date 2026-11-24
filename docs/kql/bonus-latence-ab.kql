@@ -1,0 +1,9 @@
+// Application Insights > Journaux (période : 24 heures ou 7 jours). Sources : voir README.md de ce dossier.
+// =============================================================================================
+// Bonus — latence du modèle par version (A/B 1.0.0 / 2.0.0), métrique pipeline.model_latency_ms
+// =============================================================================================
+customMetrics
+| where timestamp > ago(7d)
+| where name == "pipeline.model_latency_ms"
+| extend version = tostring(customDimensions.model_version)
+| summarize latence_moyenne_ms = round(sum(valueSum) / sum(valueCount), 1), appels = sum(valueCount) by version

@@ -97,6 +97,6 @@ fi
 cat <<FIN
 
 OK. Application Insights : $AI (région $LOC)
-Requêtes KQL : docs/kql/requetes.kql
+Requêtes KQL : docs/kql/ (résultats enregistrés par infra/preuves.sh)
 Déclencher une alerte pour la démo : source infra/pipeline/env.sh && bash infra/declencher-alerte.sh
 FIN

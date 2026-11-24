@@ -1,0 +1,13 @@
+// Application Insights > Journaux (période : 24 heures ou 7 jours). Sources : voir README.md de ce dossier.
+// =============================================================================================
+// 3b. (complément) Répartition des erreurs du pipeline par type
+//     Rejets du dispatcher (reasonCode) et échecs du worker (errorType)
+// =============================================================================================
+traces
+| where timestamp > ago(7d)
+| where message startswith "DISPATCH_REJECTED " or message startswith "WORKER_FAILED "
+| extend etape = iff(message startswith "DISPATCH_REJECTED", "dispatcher : fichier rejeté", "worker : échec")
+| extend d = parse_json(substring(message, indexof(message, " ") + 1))
+| extend type_erreur = coalesce(tostring(d.reasonCode), tostring(d.errorType))
+| summarize occurrences = count(), dernier = max(timestamp) by etape, type_erreur
+| order by occurrences desc
