@@ -147,7 +147,10 @@ En local, `RESULT_STORE=blob` enregistre les métadonnées dans `output/_meta/`,
 # 1. Vérifier les noms dans infra/pipeline/env.sh (rg-churn, francecentral, stchurnpipe, func-churn...)
 #    Le membre 2 (propriétaire de l'abonnement) lance ce script : il crée des attributions de rôles.
 source infra/pipeline/env.sh
-bash infra/pipeline/01_pipeline.sh   # Cosmos DB en premier, puis stockage, file, Function App, rôles
+bash infra/pipeline/01_pipeline.sh   # Cosmos DB en premier, puis stockage, file, Function App
+#    Un « Contributor » sur rg-churn crée tout cela, mais ne peut ni enregistrer Microsoft.EventGrid
+#    ni attribuer de rôles : le PROPRIÉTAIRE de la souscription (membre 2) lance ensuite
+bash infra/pipeline/00_owner.sh      # fournisseur Event Grid + rôles Blob/Queue de l'identité (+ Event Grid si déployé)
 # 2. Premier déploiement du code (en local, ou automatiquement par deploy.yml)
 cd functions && func azure functionapp publish "$FUNC" --python && cd ..
 bash infra/pipeline/02_eventgrid.sh  # Event Grid -> dispatcher (échoue si le code n'est pas déployé)
@@ -219,7 +222,19 @@ traces
 | Création de la Function App limitée | `429 ... throttled` | Attendre, puis relancer le script (il est ré-exécutable) |
 | Event Grid créé avant le code | Échec de validation du point de terminaison | `02_eventgrid.sh` lancé après le premier déploiement |
 | Le propriétaire n'a pas de rôle de données sur le stockage | `AuthorizationPermissionMismatch` | Clé récupérée par ARM dans le script, jamais écrite ; rôles de données attribués à l'identité de la Function App |
+| Membres « Contributor » sur `rg-churn` seulement | `AuthorizationFailed ... Microsoft.EventGrid/register/action` ; attributions de rôles refusées | Ressources créées par le membre 3 (`01_pipeline.sh`) ; fournisseur Event Grid et rôles Blob/Queue confiés au propriétaire (`00_owner.sh`). Le rôle de données Cosmos DB, lui, passe avec Contributor |
+| Application Insights non créé par `az functionapp create` | `Error while trying to create and configure an Application Insights` | Normal : `appi-churn` est créé et branché par `infra/monitoring.sh` (membre 4) |
 | ... | ... | ... |
+
+## État du déploiement (28/11/2026)
+
+| Ressource | État |
+|---|---|
+| Cosmos DB `cosmos-churn` (Free Tier), base `pipeline`, conteneur `inferences` (`/day`) | créé |
+| Stockage `stchurnpipe` : `input`, `output`, `rejected`, `models`, files `inference-requests` (+ `-poison`), site `$web` | créé |
+| Function App `func-churn` (Flex Consumption, Python 3.12) : `dispatcher`, `worker`, `recent` | déployée ; `GET /api/recent` répond 200 depuis Cosmos DB |
+| Rôle de données Cosmos DB de l'identité | attribué |
+| Rôles Blob/Queue de l'identité, fournisseur `Microsoft.EventGrid`, abonnement Event Grid | **en attente du propriétaire** : `bash infra/pipeline/00_owner.sh` |
 
 ## 10. Preuves « terminé » (section 4.3 du sujet) et captures à faire
 
