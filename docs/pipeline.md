@@ -147,7 +147,10 @@ En local, `RESULT_STORE=blob` enregistre les métadonnées dans `output/_meta/`,
 # 1. Vérifier les noms dans infra/pipeline/env.sh (rg-churn, francecentral, stchurnpipe, func-churn...)
 #    Le membre 2 (propriétaire de l'abonnement) lance ce script : il crée des attributions de rôles.
 source infra/pipeline/env.sh
-bash infra/pipeline/01_pipeline.sh   # Cosmos DB en premier, puis stockage, file, Function App, rôles
+bash infra/pipeline/01_pipeline.sh   # Cosmos DB en premier, puis stockage, file, Function App
+#    Un « Contributor » sur rg-churn crée tout cela, mais ne peut ni enregistrer Microsoft.EventGrid
+#    ni attribuer de rôles : le PROPRIÉTAIRE de la souscription (membre 2) lance ensuite
+bash infra/pipeline/00_owner.sh      # fournisseur Event Grid + rôles Blob/Queue de l'identité (+ Event Grid si déployé)
 # 2. Premier déploiement du code (en local, ou automatiquement par deploy.yml)
 cd functions && func azure functionapp publish "$FUNC" --python && cd ..
 bash infra/pipeline/02_eventgrid.sh  # Event Grid -> dispatcher (échoue si le code n'est pas déployé)
